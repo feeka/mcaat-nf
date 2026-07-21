@@ -6,82 +6,92 @@
 [![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed?labelColor=000000&logo=docker)](https://www.docker.com/)
 [![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
 
-> **This is not an nf-core pipeline.** It is built _with_ the nf-core template and follows
-> nf-core conventions, but it is developed and maintained outside the nf-core organisation.
-> Please refer to it as `RNABioInfo/mcaat-nf`, never as `nf-core/mcaat-nf`.
+> **This is not an nf-core pipeline.** It is built with the nf-core template and follows nf-core
+> conventions, but it is developed and maintained outside the nf-core organisation. Refer to it as
+> `RNABioInfo/mcaat-nf`, never as `nf-core/mcaat-nf`.
 
 ## Introduction
 
-**RNABioInfo/mcaat-nf** is a bioinformatics pipeline for discovering **CRISPR arrays directly
-in raw, unassembled metagenomic reads**, and for aggregating those discoveries across a cohort of
-samples.
+**RNABioInfo/mcaat-nf** discovers CRISPR arrays directly in raw, unassembled metagenomic reads and
+aggregates those discoveries across a cohort of samples. Detection is performed by
+[MCAAT](https://github.com/RNABioInfo/mcaat), which builds a succinct de Bruijn graph over the reads
+and identifies multicycles, the structural signature a repeat–spacer array leaves in a de Bruijn
+graph. No assembly, binning or reference database is used, so arrays are recovered from
+low-abundance community members that do not appear in an assembly. Around that detection step the
+pipeline runs read quality control, per-sample parsing into machine-readable tables, cross-sample
+spacer and repeat aggregation, and a single MultiQC report.
 
-Detection is performed by [MCAAT](https://github.com/RNABioInfo/mcaat), which builds a succinct de
-Bruijn graph over the reads and identifies _multicycles_ — the structural signature that a
-repeat–spacer array leaves in a de Bruijn graph. No assembly, no binning, and no reference
-database are involved, so arrays are recovered from low-abundance community members that would
-never appear in an assembly.
+## Requirements
 
-The pipeline wraps that detection step in the things a real study needs around it: read quality
-control, per-sample parsing into machine-readable tables, cross-sample spacer and repeat
-aggregation, and a single MultiQC report.
+| Requirement      | Value                                                                        |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Nextflow         | `>=25.10.4`                                                                   |
+| Container engine | Docker, Singularity, Podman, Apptainer, Shifter or Charliecloud                |
+| MCAAT image      | `docker.io/feeka94/mcaat:1.0.1` (`--mcaat_container`)                          |
+| Architecture     | The MCAAT image is `linux/amd64` only; on ARM hosts use `-profile arm`         |
+
+The `conda` and `mamba` profiles cover the QC and reporting layers only. MCAAT has no Bioconda
+recipe, so the MCAAT processes carry no `conda` directive and the array and phage stages do not run
+under those profiles.
 
 ## Pipeline summary
 
-1. **Merge sequencing runs** ([`cat`](https://www.gnu.org/software/coreutils/)) — rows in the
-   samplesheet that share a `sample` value are concatenated per mate before anything else runs.
+1. **Merge sequencing runs** ([`cat`](https://www.gnu.org/software/coreutils/)) — samplesheet rows
+   that share a `sample` value are concatenated per mate before any other step runs.
 2. **Raw read QC** ([`FastQC`](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)).
 3. **Adapter and quality trimming** ([`fastp`](https://github.com/OpenGene/fastp)) — strictly
    paired, merged output disabled.
 4. **Host read removal**, optional ([`Bowtie2`](https://bowtie-bio.sourceforge.net/bowtie2/)) —
-   enabled by supplying `--host_fasta` or `--host_bowtie2_index`.
-5. **phiX / contaminant removal**, optional ([`BBDuk`](https://jgi.doe.gov/data-and-tools/bbtools/)) —
-   the phiX174 reference is shipped as `assets/phix174.fasta.gz`.
-6. **Read subsampling**, optional ([`seqtk sample`](https://github.com/lh3/seqtk)) — the pipeline's
-   principal lever on MCAAT's runtime and memory envelope.
+   enabled by `--host_fasta` or `--host_bowtie2_index`.
+5. **phiX and contaminant removal**, optional
+   ([`BBDuk`](https://jgi.doe.gov/data-and-tools/bbtools/)) — the phiX174 reference ships as
+   `assets/phix174.fasta.gz`.
+6. **Read subsampling**, optional ([`seqtk sample`](https://github.com/lh3/seqtk)) — controls
+   MCAAT's runtime and memory requirements.
 7. **Post-QC read statistics and pair-synchrony gate**
    ([`SeqKit`](https://bioinf.shenwei.me/seqkit/)) — samples whose R1 and R2 record counts disagree
-   are excluded with a named message _before_ MCAAT is dispatched.
+   are excluded with a named message before MCAAT is dispatched.
 8. **Trimmed read QC** ([`FastQC`](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)).
 9. **CRISPR array detection** ([`MCAAT`](https://github.com/RNABioInfo/mcaat)) — succinct de Bruijn
-   graph construction followed by multicycle detection and repeat/spacer resolution.
-10. **Array parsing** — MCAAT's human-readable report is converted to a tidy TSV plus a spacer
-    FASTA, and the run's `parameters.json` is read back and asserted against the parameters the
-    pipeline intended to set.
-11. **Protospacer / phage curation**, optional and **experimental** (`--run_phage_curation`) —
+   graph construction, multicycle detection, repeat and spacer resolution.
+10. **Array parsing** — MCAAT's human-readable report is converted to a TSV plus a spacer FASTA, and
+    the run's `parameters.json` is read back and asserted against the parameters the pipeline set.
+11. **Protospacer and phage curation**, optional and experimental (`--run_phage_curation`) —
     reconstruction of contiguous protospacer-bearing paths from the retained graph.
 12. **Cohort aggregation** ([`csvtk`](https://bioinf.shenwei.me/csvtk/),
     [`SeqKit`](https://bioinf.shenwei.me/seqkit/) and a bundled Python summariser) — cohort array
-    table, unique spacer set, per-sample summary, pairwise spacer-sharing matrix, spacer
-    redundancy table and repeat families.
+    table, unique spacer set, per-sample summary, pairwise spacer-sharing matrix, spacer redundancy
+    table and repeat families.
 13. **Report** ([`MultiQC`](http://multiqc.info/)).
 
-### The one experimental stage
+### Phage curation stage
 
-Step **11** wraps a MCAAT subcommand that is part of MCAAT's unreleased v2.0.0 track. It is
-**disabled by default** and must be switched on explicitly with `--run_phage_curation`. It
-consumes the succinct de Bruijn graph, so it additionally requires `--mcaat_keep_graph true`
-(the default).
+Step 11 wraps `mcaat phage-curate`, a subcommand on MCAAT's unreleased v2.0.0 track.
 
-Its search is an uncapped recursive traversal with no wall-clock budget, so on a dense graph it
-can be pathologically slow. The stage is therefore configured to retry twice and then be ignored:
-one difficult sample cannot fail a cohort. If a sample has no `phage_contigs.fasta`, look for an
-ignored task in the Nextflow log.
+| Property             | Value                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| Default state        | Disabled; enable with `--run_phage_curation`                                             |
+| Additional required  | `--mcaat_keep_graph true` (the default). The stage takes the succinct graph as input.      |
+| Search               | Recursive graph traversal with no depth cap and no wall-clock limit; runtime scales with graph density |
+| Error strategy       | Retry twice, then ignore. An ignored task does not fail the run.                          |
+| Output               | `phage/<sample>/<sample>.phage_contigs.fasta`, optional                                   |
+
+When a sample has no `phage_contigs.fasta`, check the Nextflow log for an ignored task for that
+sample.
 
 ## Usage
 
 > [!NOTE]
-> If you are new to Nextflow and nf-core-style pipelines, please refer to
-> [this page](https://nf-co.re/docs/usage/installation) on how to set up Nextflow.
+> For Nextflow installation, see [this page](https://nf-co.re/docs/usage/installation).
 
 > [!IMPORTANT]
-> `-profile test` is **not yet runnable.** Every test profile resolves its samplesheet from
-> `params.pipelines_testdata_base_path`, which now points at
-> `https://raw.githubusercontent.com/RNABioInfo/mcaat-nf-testdata/main/`. **That repository does
-> not exist yet and has to be created and populated before any `test*` profile can run.**
-> See [`docs/usage.md`](docs/usage.md#test-profiles-and-test-data) for the exact layout it needs.
+> `-profile test` is not yet runnable. Every test profile resolves its samplesheet from
+> `params.pipelines_testdata_base_path`, which points at
+> `https://raw.githubusercontent.com/RNABioInfo/mcaat-nf-testdata/main/`. That repository does not
+> exist yet and has to be created and populated before any `test*` profile can run. The required
+> layout is in [`docs/usage.md`](docs/usage.md#test-profiles-and-test-data).
 
-First, prepare a samplesheet with your input data that looks as follows:
+### Samplesheet
 
 `samplesheet.csv`:
 
@@ -92,11 +102,17 @@ gut_A,L002,/data/gut_A_L002_R1.fastq.gz,/data/gut_A_L002_R2.fastq.gz,
 soil_B,,/data/soil_B.fastq.gz,,
 ```
 
-Each row is one FASTQ pair (or one single-end FASTQ). Rows that share a `sample` value are merged.
-Omit `fastq_2` for single-end data. The `sdbg` column is only used for graph re-entry — see
-[`docs/usage.md`](docs/usage.md#graph-re-entry).
+| Column    | Required | Description                                                                    |
+| --------- | -------- | ------------------------------------------------------------------------------ |
+| `sample`  | Yes      | Sample identifier. Rows sharing a value are merged per mate.                     |
+| `run`     | No       | Run or lane identifier, used to distinguish rows of the same sample.             |
+| `fastq_1` | Yes      | Path to the R1 FASTQ, or to the single-end FASTQ.                                |
+| `fastq_2` | No       | Path to the R2 FASTQ. Omit for single-end data.                                  |
+| `sdbg`    | No       | Path to an existing succinct de Bruijn graph directory, for graph re-entry.      |
 
-Now, you can run the pipeline using:
+Graph re-entry is described in [`docs/usage.md`](docs/usage.md#graph-re-entry).
+
+### Running the pipeline
 
 ```bash
 nextflow run RNABioInfo/mcaat-nf \
@@ -105,7 +121,7 @@ nextflow run RNABioInfo/mcaat-nf \
    --outdir results
 ```
 
-A complete run with QC tuning and the experimental stage enabled:
+A run with QC tuning and the phage curation stage enabled:
 
 ```bash
 nextflow run RNABioInfo/mcaat-nf \
@@ -120,43 +136,51 @@ nextflow run RNABioInfo/mcaat-nf \
 ```
 
 > [!WARNING]
-> Provide pipeline parameters via the CLI or a Nextflow `-params-file`. Custom config files
-> including those provided by the `-c` Nextflow option can be used to provide any configuration
+> Provide pipeline parameters via the CLI or a Nextflow `-params-file`. Custom config files,
+> including those provided by the `-c` Nextflow option, can be used to provide any configuration
 > _**except for parameters**_; see
 > [docs](https://nf-co.re/docs/usage/getting_started/configuration#custom-configuration-files).
 
-For more details and further functionality, please refer to the [usage documentation](docs/usage.md).
+Full parameter reference and tuning guidance: [usage documentation](docs/usage.md).
 
 ## Pipeline output
 
-The pipeline writes per-sample arrays, spacers and logs under `arrays/`, all cross-sample products
-under `reports/`, and a single MultiQC report under `multiqc/`. For details of every published
-file, see the [output documentation](docs/output.md).
+| Path                    | Contents                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `qc/`                   | FastQC, fastp, Bowtie2, BBDuk and SeqKit outputs, one subdirectory per sample    |
+| `arrays/<sample>/`      | MCAAT report, parsed array TSV, spacer FASTA, `parameters.json`, MCAAT log       |
+| `phage/<sample>/`       | `<sample>.phage_contigs.fasta`; `phage_curate.log.gz` with `--save_phage_log`. Written only with `--run_phage_curation`. |
+| `reports/`              | Cohort array table, per-sample summary, spacer sharing, spacer redundancy, repeat families, unique spacer FASTA |
+| `multiqc/`              | MultiQC report                                                                   |
+| `pipeline_info/`        | Execution timeline, report, trace and DAG                                        |
+
+Every published file, its format and its columns are documented in the
+[output documentation](docs/output.md).
 
 ## Credits
 
-RNABioInfo/mcaat-nf was written by Fikrat Talibli (RNA Bioinformatics, University of Stuttgart),
-who is also the author of MCAAT.
+RNABioInfo/mcaat-nf was written by Fikrat Talibli (RNA Bioinformatics, University of Stuttgart), who
+is also the author of MCAAT.
 
-## Contributions and Support
+## Contributions and support
 
-Bugs and feature requests belong on the
-[issue tracker](https://github.com/RNABioInfo/mcaat-nf/issues). There is no `CONTRIBUTING.md`
-yet; until there is, please open an issue before starting work on a pull request, and run
-`nf-test test` and the pre-commit hooks before submitting it.
+Report bugs and feature requests on the
+[issue tracker](https://github.com/RNABioInfo/mcaat-nf/issues). There is no `CONTRIBUTING.md` yet;
+until there is, open an issue before starting work on a pull request, and run `nf-test test` and the
+pre-commit hooks before submitting it.
 
-Bugs in the **detection tool itself** (rather than in the workflow around it) belong on the
+Bugs in the detection tool itself, rather than in the workflow around it, belong on the
 [MCAAT issue tracker](https://github.com/RNABioInfo/mcaat/issues).
 
 ## Citations
 
-If you use RNABioInfo/mcaat-nf for your analysis, please cite the MCAAT paper:
+If you use RNABioInfo/mcaat-nf for your analysis, cite the MCAAT paper:
 
 > **Metagenomic CRISPR array analysis directly from unassembled reads.**
 > _MicroLife_, 2025. doi: [10.1093/femsml/uqaf016](https://doi.org/10.1093/femsml/uqaf016)
 
-An extensive list of references for the tools used by the pipeline can be found in the
-[`CITATIONS.md`](CITATIONS.md) file.
+References for the tools used by the pipeline are listed in
+[`CITATIONS.md`](CITATIONS.md).
 
 This pipeline uses code and infrastructure developed and maintained by the
 [nf-core](https://nf-co.re) community, reused here under the MIT licence.
@@ -170,18 +194,10 @@ This pipeline uses code and infrastructure developed and maintained by the
 
 ## Licence
 
-The licensing situation has three distinct parts, and it is worth stating each of them plainly:
+| Component                | Licence  | Terms                                                                           |
+| ------------------------ | -------- | ------------------------------------------------------------------------------- |
+| This pipeline            | GPL-3.0  | Everything in this repository. Full text in [`LICENSE`](LICENSE).                 |
+| MCAAT                    | GPL-3.0  | Invoked as an external tool from a container image; no MCAAT source is vendored here. A GPL-3.0 work orchestrating a GPL-3.0 tool is compatible with no further conditions. |
+| nf-core template portions | MIT     | The repository skeleton, the `utils_nfcore_*` subworkflows, the modules under `modules/nf-core/` and the schema and lint infrastructure remain MIT-licensed by the nf-core community. MIT is compatible with GPL-3.0, so redistributing them as part of this GPL-3.0 work is permitted; their MIT copyright notices are retained where they appear. |
 
-- **This pipeline** — everything in this repository — is released under the
-  **GNU General Public License v3.0**. The full text is in [`LICENSE`](LICENSE).
-- **MCAAT** is licensed under **GPL-3.0** and is invoked as an external tool from a container
-  image. No MCAAT source code is vendored in this repository. Because the pipeline is a GPL-3.0
-  work that orchestrates a GPL-3.0 tool, the two are compatible with no further conditions.
-- **The nf-core template portions** — the repository skeleton, the `utils_nfcore_*`
-  subworkflows, the nf-core modules under `modules/nf-core/` and the schema/lint infrastructure —
-  remain **MIT-licensed by their authors** (the nf-core community). MIT is compatible with
-  GPL-3.0, so redistributing them as part of this GPL-3.0 work is permitted; their MIT copyright
-  notices are retained where they appear.
-
-If you redistribute this pipeline, redistribute it under GPL-3.0 and keep all three notices
-intact.
+Redistribute this pipeline under GPL-3.0 and keep all three notices intact.

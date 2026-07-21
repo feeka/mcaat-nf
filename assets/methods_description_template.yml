@@ -3,21 +3,25 @@ description: "Suggested text and references to use when describing pipeline usag
 section_name: "RNABioInfo/mcaat-nf Methods Description"
 section_href: "https://github.com/RNABioInfo/mcaat-nf"
 plot_type: "html"
-## This whole file, comments included, is rendered by `methodsDescriptionText()`
-## in subworkflows/local/utils_nfcore_mcaat_pipeline/main.nf with a Groovy
-## GStringTemplateEngine before MultiQC ever sees it. A dollar-brace placeholder
-## anywhere in the file - including in a comment - is evaluated, so never write
-## one that is not a real binding, and never write a bare dollar sign.
+## Rendering
 ##
-## The bindings available are:
-##   workflow           - the Nextflow `workflow` object as a map, so
-##                        workflow.manifest.version, workflow.nextflow.version
-##                        and workflow.commandLine all resolve
-##   manifest_map       - `workflow.manifest` as a plain map
-##   doi_text           - rendered pipeline DOI, empty when manifest.doi is unset
-##   nodoi_text         - a reminder list item shown only when there is no DOI
-##   tool_citations     - inline citation sentence, built from the enabled stages
-##   tool_bibliography  - bibliography list items for the enabled stages
+## This whole file, comments included, is rendered by `methodsDescriptionText()` in
+## subworkflows/local/utils_nfcore_mcaat_pipeline/main.nf with a Groovy
+## GStringTemplateEngine before MultiQC receives it. A dollar-brace placeholder
+## anywhere in the file, including inside a comment, is evaluated. Every
+## dollar-brace placeholder must be a real binding, and the file must contain no
+## bare dollar sign.
+##
+## Available bindings
+##
+##   workflow           the Nextflow `workflow` object as a map, so
+##                      workflow.manifest.version, workflow.nextflow.version and
+##                      workflow.commandLine all resolve
+##   manifest_map       `workflow.manifest` as a plain map
+##   doi_text           rendered pipeline DOI, empty when manifest.doi is unset
+##   nodoi_text         a list item shown only when there is no DOI
+##   tool_citations     inline citation sentence, built from the enabled stages
+##   tool_bibliography  bibliography list items for the enabled stages
 data: |
   <h4>Methods</h4>
   <p>
@@ -39,8 +43,8 @@ data: |
     (<a href="https://doi.org/10.1038/s41592-018-0046-7">Gruening <em>et al.</em>, 2018</a>)
     and BioContainers
     (<a href="https://doi.org/10.1093/bioinformatics/btx192">da Veiga Leprevost <em>et al.</em>, 2017</a>)
-    projects; MCAAT itself has no Bioconda recipe and is distributed as a
-    pipeline-owned container image built from a pinned source revision.
+    projects. MCAAT has no Bioconda recipe and is distributed as a pipeline-owned
+    container image built from a pinned source revision.
   </p>
   <p>
     The pipeline was executed with Nextflow v${workflow.nextflow.version}
@@ -64,8 +68,8 @@ data: |
     <h5>Notes:</h5>
     <ul>
       ${nodoi_text}
-      <li>RNABioInfo/mcaat-nf is built with the nf-core template but is <em>not</em> an nf-core pipeline. Please do not refer to it as <code>nf-core/mcaat-nf</code>, and cite MCAAT itself as the analysis method.</li>
-      <li>MCAAT's k-mer size (23) and minimum k-mer count (1) are fixed in the graph build and are not configurable from this pipeline, so they need not be reported as tunable parameters.</li>
+      <li>RNABioInfo/mcaat-nf is built with the nf-core template and is <em>not</em> an nf-core pipeline. Refer to it as <code>RNABioInfo/mcaat-nf</code>, not as <code>nf-core/mcaat-nf</code>, and cite MCAAT as the analysis method.</li>
+      <li>MCAAT's k-mer size (23) and minimum k-mer count (1) are fixed in the graph build and are not configurable from this pipeline.</li>
       <li>The command above does not include parameters contained in any configs or profiles that may have been used. Ensure the config file is also uploaded with your publication.</li>
       <li>You should also cite all software used within this run. Check the "Software Versions" of this report to get version information.</li>
     </ul>

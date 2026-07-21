@@ -10,9 +10,9 @@
   - [Read QC](#read-qc)
   - [MCAAT array detection](#mcaat-array-detection)
   - [Stage activation](#stage-activation)
-  - [Phage / protospacer curation (experimental)](#phage--protospacer-curation-experimental)
+  - [Phage / protospacer curation](#phage--protospacer-curation)
   - [Reporting](#reporting)
-  - [Parameters that deliberately do not exist](#parameters-that-deliberately-do-not-exist)
+  - [Fixed MCAAT settings](#fixed-mcaat-settings)
 - [Graph re-entry](#graph-re-entry)
 - [Test profiles and test data](#test-profiles-and-test-data)
 - [Resources and tuning for large metagenomes](#resources-and-tuning-for-large-metagenomes)
@@ -23,18 +23,24 @@
 
 ## Introduction
 
-This pipeline runs [MCAAT](https://github.com/RNABioInfo/mcaat) over quality-controlled
-metagenomic reads to find CRISPR repeat–spacer arrays without assembling anything, then parses and
-aggregates the results across a cohort.
+This pipeline runs [MCAAT](https://github.com/RNABioInfo/mcaat) over quality-controlled metagenomic
+reads to find CRISPR repeat–spacer arrays without assembly, then parses and aggregates the results
+across a cohort.
 
-Everything below assumes you have Nextflow `>=25.10.4` and one container engine (Docker, Singularity
-/ Apptainer, Podman or Charliecloud). A `conda` profile is inherited from the nf-core template, but
-**it cannot run the detection step**: MCAAT has no Bioconda package, so its processes declare no
-Conda environment. Use a container engine.
+Requirements:
+
+| Component        | Requirement                                                             |
+| ---------------- | ----------------------------------------------------------------------- |
+| Nextflow         | `>=25.10.4`                                                             |
+| Container engine | Docker, Singularity / Apptainer, Podman or Charliecloud                 |
+
+MCAAT has no Bioconda package and its processes declare no Conda environment. The `conda` profile
+inherited from the nf-core template runs the QC and reporting layers only; it cannot run the
+array-detection or phage stages.
 
 ## Samplesheet input
 
-You need a comma-separated file with a header row. Pass it with `--input`.
+The samplesheet is a comma-separated file with a header row, passed with `--input`.
 
 ```bash
 --input '[full path to samplesheet file]'
@@ -42,15 +48,17 @@ You need a comma-separated file with a header row. Pass it with `--input`.
 
 ### Columns
 
-| Column    | Required | Description                                                                                                                                          |
-| --------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sample`  | yes      | Sample identifier. No spaces. Rows sharing a value are concatenated before analysis. This string is used verbatim in every output path and filename.  |
-| `run`     | no       | Sequencing run or lane identifier. No spaces. Only used to keep multiple rows of the same sample distinct; it is dropped once the rows have been merged. |
-| `fastq_1` | yes\*    | Full path to the R1 FASTQ (or the single-end FASTQ). Must end `.fastq.gz`, `.fq.gz`, `.fastq` or `.fq`.                                               |
-| `fastq_2` | no       | Full path to the R2 FASTQ. Leaving it empty marks the sample as single-end.                                                                           |
-| `sdbg`    | no       | Full path to a pre-built MCAAT graph directory, for re-analysis without rebuilding it. Mutually exclusive with `fastq_1`. See [Graph re-entry](#graph-re-entry). |
+| Column    | Required | Description                                                                                                                                             |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sample`  | yes      | Sample identifier. No spaces. Rows sharing a value are concatenated before analysis. Used verbatim in every output path and filename.                    |
+| `run`     | no       | Sequencing run or lane identifier. No spaces. Keeps multiple rows of the same sample distinct; dropped once the rows have been merged.                   |
+| `fastq_1` | yes\*    | Path to the R1 FASTQ (or the single-end FASTQ). Extension must be `.fastq.gz`, `.fq.gz`, `.fastq` or `.fq`.                                              |
+| `fastq_2` | no       | Path to the R2 FASTQ. Same extensions. An empty value marks the sample as single-end. Cannot be supplied without `fastq_1`.                              |
+| `sdbg`    | no       | Path to a pre-built MCAAT graph directory, for re-analysis without rebuilding it. Mutually exclusive with `fastq_1`. See [Graph re-entry](#graph-re-entry). |
 
-\* `fastq_1` is required unless the row supplies `sdbg` instead.
+\* Each row must supply either `fastq_1` or `sdbg`.
+
+The pair `sample` + `run` must be unique across the samplesheet.
 
 ### Multiple runs of the same sample
 
@@ -64,8 +72,8 @@ CONTROL_REP1,L002,AEG588A1_S1_L002_R1_001.fastq.gz,AEG588A1_S1_L002_R2_001.fastq
 CONTROL_REP1,L003,AEG588A1_S1_L003_R1_001.fastq.gz,AEG588A1_S1_L003_R2_001.fastq.gz,
 ```
 
-All rows for one sample must agree on single- vs paired-endedness. Mixing them is an error and the
-pipeline stops at launch, naming the offending sample.
+All rows for one sample must agree on single- vs paired-endedness. A mixed set stops the run at
+launch with an error naming the sample.
 
 ### Full example
 
@@ -77,24 +85,25 @@ soil_B,,/data/soil_B.fastq.gz,,
 rerun_C,,,,/archive/mcaat_run1/arrays/rerun_C/graph
 ```
 
-### Why paired input is handled so strictly
+### Paired-end input handling
 
-MCAAT accepts exactly one or two input files, and it treats two files as a **strictly synchronised**
-paired-end library — record _n_ of file 1 is assumed to be the mate of record _n_ of file 2. If the
-two files hold different numbers of records, the underlying graph builder aborts with an empty error
-log, which is close to undebuggable.
+MCAAT accepts one or two input files and treats two files as a strictly synchronised paired-end
+library: record _n_ of file 1 is taken as the mate of record _n_ of file 2. If the two files hold
+different numbers of records, the graph builder aborts. Its stderr is redirected to `/dev/null`
+inside MCAAT, so `.command.err` is empty for that failure.
 
 The pipeline therefore:
 
-- runs `fastp` in strict paired mode and never routes failed/orphan reads onward
-  (`--fastp_save_trimmed_fail` writes them to a separate published file only);
+- runs `fastp` in strict paired mode with `--detect_adapter_for_pe`, and never routes failed or
+  orphan reads onward (`--fastp_save_trimmed_fail` writes them to a separate published file only);
 - never produces merged reads;
 - subsamples both mates with the same `seqtk` seed;
-- and asserts, from `seqkit stats`, that R1 and R2 record counts are identical **before** MCAAT is
-  dispatched. Samples that fail this check are excluded from the run with an explicit message and
-  the rest of the cohort continues.
+- asserts, from the `num_seqs` column of `seqkit stats`, that R1 and R2 record counts are identical
+  before MCAAT is dispatched. Samples failing this check are excluded from the run with a
+  `MCAAT-NF: EXCLUDING sample` message, and the rest of the cohort continues.
 
-You can disable that assertion with `--skip_pairsync_check`.
+`--skip_pairsync_check` disables the assertion. `--skip_qc` bypasses the whole QC subworkflow,
+including the assertion.
 
 ## Running the pipeline
 
@@ -105,10 +114,10 @@ nextflow run RNABioInfo/mcaat-nf \
    -profile docker
 ```
 
-This writes the results to `./results`, plus `work/` (intermediates) and `.nextflow*` (logs and
-cache) in the launch directory.
+This writes results to `./results`, plus `work/` (intermediates) and `.nextflow*` (logs and cache)
+in the launch directory.
 
-To supply parameters from a file instead of the command line:
+To supply parameters from a file:
 
 ```bash
 nextflow run RNABioInfo/mcaat-nf -profile docker -params-file params.yaml
@@ -122,26 +131,24 @@ remove_phix: true
 ```
 
 > [!WARNING]
-> Do not put pipeline parameters in a `-c` config file. Use the CLI or `-params-file`. Parameters
-> set in `-c` files are not validated and interact badly with profile precedence.
+> Pipeline parameters set in a `-c` config file are not validated and interact with profile
+> precedence. Pass parameters on the CLI or through `-params-file`.
 
-### Updating and reproducibility
+### Updating and version pinning
 
 ```bash
 nextflow pull RNABioInfo/mcaat-nf                    # update to the latest version
 nextflow run RNABioInfo/mcaat-nf -r 1.0.0 ...        # pin an exact release
 ```
 
-Always record the `-r` you used. The pipeline writes the full resolved parameter set to
+Record the `-r` value used for a run. The pipeline writes the full resolved parameter set to
 `results/pipeline_info/params_<suffix>.json` on every run.
 
 ## Parameters
 
-Every parameter below is validated against `nextflow_schema.json` at launch. Run
-`nextflow run RNABioInfo/mcaat-nf --help` for the short form, `--help_full` for everything.
-
-Every parameter listed here reaches a tool. If you find one that does not, that is a bug — please
-report it.
+Parameters are validated against `nextflow_schema.json` at launch. Run
+`nextflow run RNABioInfo/mcaat-nf --help` for the short parameter list, `--help_full` for all
+parameters including hidden ones.
 
 ### Input/output
 
@@ -154,112 +161,121 @@ report it.
 
 ### Read QC
 
-All QC steps are on by default, so they are switched off with `skip_*` flags.
+All QC steps are on by default and are switched off with `skip_*` flags.
 
-| Parameter                 | Type              | Default                                 | Description                                                                                                                                                                     |
-| ------------------------- | ----------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `skip_qc`                 | boolean           | `false`                                 | Bypass the whole QC subworkflow and feed samplesheet reads straight to MCAAT. **Unsafe for paired input** — the pair-sync gate lives inside the QC subworkflow and will not run. |
-| `skip_fastqc`             | boolean           | `false`                                 | Skip both FastQC instances.                                                                                                                                                     |
-| `skip_fastp`              | boolean           | `false`                                 | Skip adapter/quality trimming.                                                                                                                                                  |
-| `fastp_save_trimmed_fail` | boolean           | `false`                                 | Write reads that failed fastp filters to a separate published file. They are never fed to MCAAT.                                                                                |
-| `save_trimmed_reads`      | boolean           | `false`                                 | Publish the trimmed FASTQ files.                                                                                                                                                |
-| `host_fasta`              | path              | `null`                                  | Host genome FASTA (local path or `https://` URL). Setting it enables host depletion with Bowtie2.                                                                               |
-| `host_bowtie2_index`      | path              | `null`                                  | Pre-built Bowtie2 index directory. Takes precedence over `host_fasta` and skips the index build.                                                                                |
-| `save_hostremoved_reads`  | boolean           | `false`                                 | Publish host-depleted FASTQ files.                                                                                                                                              |
-| `remove_phix`             | boolean           | `false`                                 | Enable BBDuk k-mer scrubbing against `phix_reference`.                                                                                                                          |
-| `phix_reference`          | path              | `${projectDir}/assets/phix174.fasta.gz` | Contaminant FASTA for BBDuk. The phiX174 genome **is shipped** in `assets/`, so `--remove_phix` works with no extra download. Must stay small — BBDuk builds an in-memory k-mer table, so **never** point this at a mammalian genome. |
-| `subsample_reads`         | integer or number | `null`                                  | Read budget per mate. An integer takes that many reads; a float `0 < x < 1` takes that fraction. `null` disables subsampling.                                                    |
-| `subsample_seed`          | integer           | `100`                                   | `seqtk sample` seed. Applied identically to both mates, which is what preserves pairing.                                                                                        |
-| `skip_pairsync_check`     | boolean           | `false`                                 | Disable the R1/R2 record-count assertion. Do not set this.                                                                                                                      |
+| Parameter                 | Type              | Default                                 | Description                                                                                                                                                            |
+| ------------------------- | ----------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `skip_qc`                 | boolean           | `false`                                 | Bypass the whole QC subworkflow and feed samplesheet reads straight to MCAAT. The R1/R2 pair-sync gate is part of this subworkflow and does not run when it is set.     |
+| `skip_fastqc`             | boolean           | `false`                                 | Skip both FastQC instances (raw and trimmed).                                                                                                                          |
+| `skip_fastp`              | boolean           | `false`                                 | Skip adapter and quality trimming.                                                                                                                                     |
+| `fastp_save_trimmed_fail` | boolean           | `false`                                 | Write reads that failed the fastp filters to a separate published file. These reads are not fed to MCAAT.                                                               |
+| `save_trimmed_reads`      | boolean           | `false`                                 | Publish the trimmed FASTQ files.                                                                                                                                       |
+| `host_fasta`              | path              | `null`                                  | Host genome FASTA (local path or `https://` URL). Setting it enables host depletion with Bowtie2. The index is built once per run and reused for every sample.          |
+| `host_bowtie2_index`      | path              | `null`                                  | Pre-built Bowtie2 index directory. Takes precedence over `host_fasta` and skips the index build. Supplying both emits a warning at launch.                              |
+| `save_hostremoved_reads`  | boolean           | `false`                                 | Publish host-depleted FASTQ files.                                                                                                                                     |
+| `remove_phix`             | boolean           | `false`                                 | Enable BBDuk k-mer scrubbing (`k=31 hdist=1`) against `phix_reference`.                                                                                                |
+| `phix_reference`          | path              | `${projectDir}/assets/phix174.fasta.gz` | Contaminant FASTA for BBDuk. The phiX174 genome (NCBI NC_001422.1, 5386 bp) is shipped in `assets/`, so `--remove_phix` needs no download. BBDuk builds an in-memory k-mer table over the whole reference; a mammalian genome does not fit. |
+| `subsample_reads`         | integer or number | `null`                                  | Read budget per mate, passed to `seqtk sample`. An integer takes that many reads; a float `0 < x < 1` takes that fraction. `null` disables subsampling.                 |
+| `subsample_seed`          | integer           | `100`                                   | `seqtk sample` seed (`-s`). Applied identically to both mates, which preserves pairing through subsampling. Minimum 1.                                                  |
+| `skip_pairsync_check`     | boolean           | `false`                                 | Disable the R1/R2 record-count assertion. Without it, a de-synchronised pair reaches MCAAT and the task fails with exit 1 and an empty `.command.err`.                  |
 
 ### MCAAT array detection
 
-| Parameter                      | Type    | Default   | Description                                                                                                                                                                                                                         |
-| ------------------------------ | ------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mcaat_min_spacer_len`         | integer | `23`      | Minimum spacer length retained during post-processing.                                                                                                                                                                              |
-| `mcaat_max_spacer_len`         | integer | `50`      | Maximum spacer length.                                                                                                                                                                                                              |
-| `mcaat_min_repeat_len`         | integer | `23`      | Minimum repeat length. **Cannot be lower than 23**: the de Bruijn graph is built with a hard-coded _k_ of 23, so shorter repeats are not representable.                                                                              |
-| `mcaat_max_repeat_len`         | integer | `55`      | Maximum repeat length.                                                                                                                                                                                                              |
-| `mcaat_cycle_min_length`       | integer | `27`      | Minimum multicycle length searched in the graph.                                                                                                                                                                                    |
-| `mcaat_cycle_max_length`       | integer | `77`      | Maximum multicycle length searched.                                                                                                                                                                                                 |
-| `mcaat_threshold_multiplicity` | integer | `20`      | Minimum edge multiplicity for a node to seed a cycle search. Lower it to catch rarer array-bearing organisms, at a steep runtime cost.                                                                                               |
-| `mcaat_low_abundance`          | boolean | `true`    | Low-abundance mode.                                                                                                                                                                                                                 |
-| `mcaat_keep_graph`             | boolean | `true`    | Keep the graph in the task work directory after the run. Required by the phage stage and by `save_mcaat_graph`. **This is the one documented cache-busting switch** — see [Resume behaviour](#resume-behaviour-and-caching).          |
-| `prune_graph`                  | boolean | `true`    | Delete graph-builder intermediates that MCAAT never reads back (`outfile_prefix.bin`, `outfile_prefix.lib_info`, `data.lib`, `graph.mercy_cand.*`). Set `false` only if you need a directory that other MEGAHIT-derived tools can consume; it is roughly 3–4× larger. |
-| `save_mcaat_graph`             | boolean | `false`   | Publish the (pruned) graph under `arrays/<sample>/graph/`. Requires `mcaat_keep_graph`.                                                                                                                                              |
-| `graph_publish_mode`           | string  | `symlink` | `publishDir` mode used for the graph only, so publishing does not copy tens of gigabytes. One of `symlink`, `copy`, `link`, `rellink`.                                                                                               |
-| `save_mcaat_cycles`            | boolean | `false`   | Publish `cycles.txt`. It can be enormous and its line order is not deterministic.                                                                                                                                                   |
-| `mcaat_scratch`                | string  | `null`    | If set (e.g. `'$TMPDIR'` or an absolute path), used as the Nextflow `scratch` directive for all MCAAT processes, relocating every intermediate to node-local storage.                                                                |
-| `mcaat_args`                   | string  | `null`    | Raw arguments appended to the `mcaat` command line. **Hazard:** MCAAT silently ignores unrecognised arguments, so a typo here has no visible effect. The only thing that catches it is the `parameters.json` readback described below. |
+| Parameter                      | Type    | Default                          | Description                                                                                                                                                              |
+| ------------------------------ | ------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mcaat_min_spacer_len`         | integer | `23`                             | Minimum spacer length (`--min-spacer-len`), applied as a post-processing filter. Minimum 1.                                                                              |
+| `mcaat_max_spacer_len`         | integer | `50`                             | Maximum spacer length (`--max-spacer-len`). Minimum 1.                                                                                                                   |
+| `mcaat_min_repeat_len`         | integer | `23`                             | Minimum repeat length (`--min-repeat-len`). Schema minimum 23: the de Bruijn graph is built with a hard-coded _k_ of 23, so shorter repeats are not representable.        |
+| `mcaat_max_repeat_len`         | integer | `55`                             | Maximum repeat length (`--max-repeat-len`). Minimum 23.                                                                                                                  |
+| `mcaat_cycle_min_length`       | integer | `27`                             | Minimum multicycle length in graph nodes (`--cycle-min-length`). Minimum 1.                                                                                              |
+| `mcaat_cycle_max_length`       | integer | `77`                             | Maximum multicycle length in graph nodes (`--cycle-max-length`). Minimum 1.                                                                                              |
+| `mcaat_threshold_multiplicity` | integer | `20`                             | Multiplicity a candidate cycle must reach to be reported (`--threshold-multiplicity`). Lower values recover rarer array-bearing organisms and increase runtime. Minimum 1. |
+| `mcaat_low_abundance`          | boolean | `true`                           | Low-abundance mode (`--low-abundance`). Rendered as the lowercase string `true` or `false`; MCAAT accepts only `1`, `true` or `yes` and reads anything else as false.     |
+| `mcaat_keep_graph`             | boolean | `true`                           | Keep the graph in the task work directory after the run. Required by the phage stage and by `save_mcaat_graph`. Changing it invalidates cached `MCAAT_RUN` tasks — see [Resume behaviour](#resume-behaviour-and-caching). |
+| `prune_graph`                  | boolean | `true`                           | Delete graph-builder intermediates that MCAAT never reads back (`outfile_prefix.bin`, `outfile_prefix.lib_info`, `data.lib`, `graph.mercy_cand.*`). Set `false` for a directory other MEGAHIT-derived tools can consume; it is roughly 3–4× larger. |
+| `save_mcaat_graph`             | boolean | `false`                          | Publish the (pruned) graph under `arrays/<sample>/graph/`. Requires `mcaat_keep_graph`.                                                                                   |
+| `graph_publish_mode`           | string  | `symlink`                        | `publishDir` mode used for the graph directory only. One of `symlink`, `copy`, `link`, `rellink`.                                                                        |
+| `save_mcaat_cycles`            | boolean | `false`                          | Publish `cycles.txt`. One line per cycle, 23 bp per node; the file can be enormous, which is why publishing is off by default. Its line order comes from an unordered-map iteration and is not byte-reproducible between runs. |
+| `mcaat_scratch`                | string  | `null`                           | Value for the Nextflow `scratch` directive on all MCAAT processes, e.g. `'$TMPDIR'` or an absolute path. Relocates every MCAAT intermediate to that storage.              |
+| `mcaat_args`                   | string  | `null`                           | Raw arguments appended to the `mcaat` command line before `--input-files`. MCAAT ignores unrecognised arguments without a warning, so a typo here has no visible effect; the `parameters.json` readback below is the detector. Setting it emits a warning at launch. |
+| `mcaat_container`              | string  | `docker.io/feeka94/mcaat:1.0.1`  | Container image providing the `mcaat` binary. Built from this repository's `Dockerfile.local` with `-march=x86-64-v2`, `spoa_optimize_for_native=OFF`, no `ENTRYPOINT`, and `ENV MCAAT_VERSION` set. |
 
 #### The `parameters.json` readback
 
 MCAAT's argument parser has no unknown-argument branch: a misspelled flag is discarded without a
-warning and the run proceeds with defaults. To make that detectable, the array-parsing step reads
-MCAAT's own `parameters.json` back and asserts that the resolved thread count, multiplicity
-threshold, cycle bounds, spacer/repeat bounds and autoclean setting match what the pipeline meant to
-set. A mismatch fails the task and prints expected vs. observed. If you use `mcaat_args`, this is
-your safety net; check the task log rather than assuming the flag took effect.
+warning and the run proceeds with defaults. The array-parsing step reads MCAAT's own
+`parameters.json` back and asserts that the resolved thread count, multiplicity threshold, cycle
+bounds, spacer/repeat bounds and autoclean setting match the values the pipeline set. A mismatch
+fails the task and prints expected versus observed. The readback can only check flags the pipeline
+itself sets.
 
 The same step writes the values it read into `<sample>.provenance.tsv`, which the cohort layer
-consumes so that the resolved MCAAT settings end up as columns of `cohort_summary.tsv`.
+consumes so that the resolved MCAAT settings become columns of `cohort_summary.tsv`.
 
 ### Stage activation
 
-| Parameter            | Type    | Default | Description                                                                        |
-| -------------------- | ------- | ------- | ---------------------------------------------------------------------------------- |
-| `run_phage_curation` | boolean | `false` | Enable protospacer / phage curation. **Experimental.** Requires `mcaat_keep_graph`. |
+| Parameter            | Type    | Default | Description                                                                             |
+| -------------------- | ------- | ------- | ----------------------------------------------------------------------------------------- |
+| `run_phage_curation` | boolean | `false` | Enable the protospacer / phage curation stage. Experimental. Requires `mcaat_keep_graph`. |
 
-This is the only stage toggle.
+### Phage / protospacer curation
 
-### Phage / protospacer curation (experimental)
+The stage belongs to MCAAT's unreleased v2.0.0 track and is off by default.
 
-| Parameter        | Type    | Default | Description                             |
-| ---------------- | ------- | ------- | --------------------------------------- |
-| `save_phage_log` | boolean | `false` | Publish the gzipped `phage-curate` log. |
+| Parameter        | Type    | Default | Description                                    |
+| ---------------- | ------- | ------- | ---------------------------------------------- |
+| `save_phage_log` | boolean | `false` | Publish the gzipped `phage-curate` stdout log. |
 
-There is nothing else to tune: every other knob in this MCAAT subcommand is hard-coded (search
-depth, and the 500–2500 bp contig length bounds) or accepted-but-unread. The stage is compute-bound
-and can be pathologically slow on a dense graph, so it is configured to retry twice and then be
-ignored, rather than fail the whole cohort.
+Every other setting in this MCAAT subcommand is hard-coded (search depth 50, overridden per cycle;
+contig length bounds 500–2500 bp) or accepted and never read (`--beam-width`).
 
-Treat its output as a lead rather than a result: the paths it reconstructs are graph walks around a
-spacer match, with no independent evidence that the walk corresponds to a real contiguous element.
+The underlying search is a recursive depth-first traversal with no candidate cap and no wall-clock
+budget, followed by two O(n²) `std::search` subpath filters, so wall time is the binding constraint
+rather than memory. `MCAAT_PHAGECURATE` retries twice and is then ignored, so one sample cannot fail
+the cohort.
+
+The reconstructed paths are graph walks around a spacer match. The pipeline provides no independent
+evidence that a walk corresponds to a contiguous element.
 
 ### Reporting
 
-| Parameter                      | Type    | Default | Description                                                                         |
-| ------------------------------ | ------- | ------- | ----------------------------------------------------------------------------------- |
-| `skip_cohort_aggregation`      | boolean | `false` | Skip the cohort concatenation, deduplication and summary steps.                     |
-| `skip_multiqc`                 | boolean | `false` | Skip the MultiQC report.                                                            |
-| `cohort_min_spacer_sharing`    | integer | `2`     | Minimum number of shared spacers for a sample pair to appear in the sharing matrix. |
-| `cohort_min_spacer_redundancy` | integer | `2`     | Minimum number of samples a spacer sequence must occur in to appear in `cohort_spacer_redundancy.tsv`. |
-| `multiqc_config`               | path    | `null`  | Extra MultiQC config, merged with the pipeline's own.                               |
-| `multiqc_logo`                 | path    | `null`  | Custom logo for the report.                                                         |
-| `multiqc_methods_description`  | path    | `null`  | Custom methods-description YAML.                                                    |
+| Parameter                      | Type    | Default | Description                                                                                             |
+| ------------------------------ | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `skip_cohort_aggregation`      | boolean | `false` | Skip the cross-sample layer (`CSVTK_CONCAT`, `SEQKIT_RMDUP`, `COHORT_SUMMARISE`).                        |
+| `skip_multiqc`                 | boolean | `false` | Skip the MultiQC report.                                                                                |
+| `cohort_min_spacer_sharing`    | integer | `2`     | Minimum number of shared spacers for a sample pair to appear in the sharing matrix. Minimum 0; `0` emits every pair, giving an N² table. |
+| `cohort_min_spacer_redundancy` | integer | `2`     | Minimum number of samples a spacer sequence must occur in to appear in `cohort_spacer_redundancy.tsv`. Minimum 0; `1` emits every spacer in the study. |
+| `multiqc_config`               | path    | `null`  | Extra MultiQC config, merged with the pipeline's own.                                                   |
+| `multiqc_logo`                 | path    | `null`  | Custom logo for the report.                                                                             |
+| `multiqc_methods_description`  | path    | `null`  | Custom methods-description YAML.                                                                        |
 
-Both cohort thresholds are rendered into the `COHORT_SUMMARISE` command line as
+Both cohort thresholds are rendered onto the `COHORT_SUMMARISE` command line as
 `--min-spacer-sharing` / `--min-spacer-redundancy`. `ext.args` is appended after them, so a config
-can still override either value without the module knowing about it.
+can override either value.
 
-### Settings that are not configurable
+### Fixed MCAAT settings
 
-| Setting                                    | Why                                                                                                                                                                                                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| k-mer size                                 | Hard-coded to 23 in the graph build. This is also why `mcaat_min_repeat_len` cannot go below 23.                                                                                                                                                            |
-| minimum k-mer frequency                    | Hard-coded to 1, i.e. no error-k-mer filtering. This is why resource use tracks total sequenced bases.                                                                                                                                                      |
-| `--ram`                                    | The flag exists but has no effect (a gigabyte figure is passed into a byte-valued field). The pipeline derives a value internally purely to keep MCAAT's own validation from tripping; `memory` is an OOM ceiling, not a cap MCAAT respects.                 |
-| `--threads`                                | Derived from `task.cpus` and clamped to `nproc`.                                                                                                                                                                                                           |
-| `--autoclean`                              | Always `false`. Cleanup is done by the pipeline in shell, so that the command text does not change when you flip a stage toggle.                                                                                                                            |
-| `--output-folder`                          | Always `mcaat`, inside the task directory.                                                                                                                                                                                                                 |
-| `--settings`                               | A settings file's `input-files` key concatenates with the command-line one instead of replacing it, which can silently turn a single-end run into a mis-paired paired-end run.                                                                              |
-| `--benchmark`                              | Accepted and stored, but its consumer is never called.                                                                                                                                                                                                     |
-| phage `--beam-width`, depth, length bounds | Accepted but never read, or hard-coded.                                                                                                                                                                                                                    |
+| Setting                                    | Behaviour                                                                                                                                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| k-mer size                                 | Hard-coded to 23 in the graph build. `mcaat_min_repeat_len` cannot go below 23 for the same reason.                                                                                                     |
+| minimum k-mer frequency                    | Hard-coded to 1, so no error-k-mer filtering takes place. Resource use tracks total sequenced bases.                                                                                                    |
+| `--ram`                                    | Derived inside the task at runtime as 90 % of the cgroup memory limit, with a 2 GB floor, falling back to `/proc/meminfo` when no cgroup limit is set. It is not interpolated from `task.memory`, so retuning the `memory` directive does not change the task hash. The clamp keeps MCAAT's `ram <= 1.0` and `ram > total system RAM` validation branches unreachable; both route into an interactive stdin prompt. |
+| `--threads`                                | Derived from `task.cpus` and clamped to `nproc`. MCAAT rejects a thread count above `std::thread::hardware_concurrency()` and routes that failure into the interactive prompt.                          |
+| `--autoclean`                              | Always `false`. The default is `true` and recursively deletes `<out>/graph`. Cleanup is done by the pipeline in shell, so the resolved command text does not change when a stage toggle is flipped.     |
+| `--output-folder`                          | Always `mcaat`, a subdirectory inside the task directory. The MCAAT default is a localtime-derived `mcaat_run_<timestamp>` name.                                                                        |
+| `--settings`                               | Not used. A settings file's `input-files` key concatenates with the command-line one instead of replacing it, which can turn a single-end run into a mis-paired paired-end run.                          |
+| `--benchmark`                              | Accepted and stored, but its consumer is never called.                                                                                                                                                 |
+| phage `--beam-width`, depth, length bounds | Accepted but never read, or hard-coded.                                                                                                                                                                |
+| stdin                                      | All MCAAT invocations read from `/dev/null`. On a settings-validation failure MCAAT prompts `Remove it? (y/n):` and reads an uninitialised char; one branch calls `fs::remove_all()` on the output folder. With a tty or a pipe on stdin the job blocks holding a scheduler slot. |
+
+Launch-time validation rejects `mcaat_min_spacer_len > mcaat_max_spacer_len`,
+`mcaat_min_repeat_len > mcaat_max_repeat_len`, `mcaat_cycle_min_length > mcaat_cycle_max_length`,
+`run_phage_curation` without `mcaat_keep_graph`, and `save_mcaat_graph` without `mcaat_keep_graph`.
 
 ## Graph re-entry
 
-Building the de Bruijn graph is by far the most expensive step. If you already have a graph from a
-previous published run, you can re-analyse it with the phage stage without rebuilding:
+Building the de Bruijn graph is the most expensive step. An existing graph from a previous published
+run can be re-analysed with the phage stage without rebuilding:
 
 ```csv
 sample,run,fastq_1,fastq_2,sdbg
@@ -276,40 +292,46 @@ nextflow run RNABioInfo/mcaat-nf \
 
 Rules:
 
-- The row must supply `sdbg` and must **not** supply `fastq_1`.
-- The directory must contain `graph.sdbg_info` and at least one `graph.sdbg.<N>` shard. MCAAT
-  loads the graph without validating the path, so the pipeline checks it for you and fails with a
-  clear message if the file is missing or empty.
-- The stage also needs that sample's arrays. They are located by convention, as the sibling of the
-  graph directory: `<sdbg>/../CRISPR_Arrays_*.txt`. That is exactly the layout a previous run
-  published under `arrays/<sample>/`, so pointing `sdbg` at `…/arrays/<sample>/graph` works
-  unchanged. If no array files are found there, the pipeline stops at launch and names the sample.
-- Graph re-entry is only meaningful with `--run_phage_curation`; it does not re-run array
-  detection, and a re-entry row therefore contributes no rows to the cohort tables (it carries no
-  `parameters.json` and no parsed array table of its own).
+- The row must supply `sdbg` and must not supply `fastq_1`.
+- The directory must contain `graph.sdbg_info` and at least one `graph.sdbg.<N>` shard. MCAAT loads
+  the graph without validating the path, so the pipeline checks it and fails with a named message
+  when the file is missing or empty.
+- The stage also needs that sample's arrays. They are located as the sibling of the graph directory:
+  `<sdbg>/../CRISPR_Arrays_*.txt`. That is the layout a previous run publishes under
+  `arrays/<sample>/`, so pointing `sdbg` at `…/arrays/<sample>/graph` resolves them. When no array
+  files are found there, the pipeline stops at launch and names the sample.
+- Graph re-entry applies to `--run_phage_curation`. It does not re-run array detection, and a
+  re-entry row contributes no rows to the cohort tables: it carries no `parameters.json` and no
+  parsed array table of its own.
 
-To produce re-usable graphs in the first place, run with `--save_mcaat_graph --graph_publish_mode copy`.
-The default publish mode for the graph is `symlink`, which points back into `work/` and therefore
-does **not** survive `nextflow clean`.
+To produce re-usable graphs, run with `--save_mcaat_graph --graph_publish_mode copy`. The default
+graph publish mode `symlink` points back into `work/` and does not survive `nextflow clean`.
 
 ## Test profiles and test data
 
 > [!IMPORTANT]
-> **The test-data repository does not exist yet, so `-profile test` cannot run today.** This is
-> stated plainly rather than papered over.
+> The test-data repository does not exist yet, so `-profile test` cannot run.
 
-The four test profiles are `test`, `test_phage`, `test_graph` and `test_full`. Every one of them
-builds its `--input` from `params.pipelines_testdata_base_path`, whose default is:
+The four test profiles are `test`, `test_phage`, `test_graph` and `test_full`. Each builds its
+`--input` from `params.pipelines_testdata_base_path`, whose default is:
 
 ```
 https://raw.githubusercontent.com/RNABioInfo/mcaat-nf-testdata/main/
 ```
 
-**That repository has to be created and populated before any of the test profiles will run.**
-Until it exists, launching `-profile test` fails while resolving the samplesheet URL — the failure
-is immediate and has nothing to do with MCAAT.
+Until that repository is created and populated, launching any test profile fails while resolving the
+samplesheet URL, before MCAAT is reached.
 
-The layout the profiles expect, relative to that base path:
+Profile settings:
+
+| Profile      | Samplesheet                          | Notable parameters                                                                       |
+| ------------ | ------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `test`       | `mcaat-nf/samplesheet/samplesheet.csv`       | `subsample_reads 2000`, `subsample_seed 100`; MCAAT defaults; resource limits 4 cpus / 15 GB / 1 h. |
+| `test_phage` | `mcaat-nf/samplesheet/samplesheet.csv`       | Same input and MCAAT settings as `test`, plus `run_phage_curation true`, `mcaat_keep_graph true`, `save_phage_log true`; resource limits 4 cpus / 15 GB / 1 h. |
+| `test_graph` | `mcaat-nf/samplesheet/samplesheet_graph.csv` | `run_phage_curation true`, `mcaat_keep_graph true`, `save_phage_log true`, `subsample_reads 2000`, `subsample_seed 100`; resource limits 4 cpus / 15 GB / 1 h. Samplesheet rows carry `sdbg` and no `fastq_1`. |
+| `test_full`  | `mcaat-nf/samplesheet/samplesheet_full.csv`  | `subsample_reads null`, `remove_phix true`, `mcaat_keep_graph true`, `prune_graph true`, `save_mcaat_graph false`, `save_mcaat_cycles false`, `run_phage_curation false`, `multiqc_title 'mcaat-nf full-size test'`. Not run in PR CI; dispatched manually to obtain resource measurements. |
+
+The layout the profiles expect, relative to the base path:
 
 ```
 mcaat-nf/
@@ -324,12 +346,12 @@ mcaat-nf/
                                  # for the graph re-entry profile
 ```
 
-The reads for `-profile test` should be small enough for CI: a few thousand read pairs spiked with
-at least one real CRISPR array, so that the run exercises the parser and the cohort layer rather
-than only the zero-result path. At least two samples are needed for the spacer-sharing matrix and
-the MultiQC heatmap to be produced at all — with a single sample they are deliberately skipped.
+Constraints on the `-profile test` reads: a few thousand read pairs, small enough for the GitHub
+Actions budget, containing at least one CRISPR array so the run exercises the parser and the cohort
+layer as well as the zero-result path. The spacer-sharing matrix and the MultiQC heatmap require at
+least two samples; with a single sample they are skipped.
 
-Until the repository exists, you can still exercise the profiles against local files:
+The profiles can be run against local files:
 
 ```bash
 nextflow run RNABioInfo/mcaat-nf -profile test,docker \
@@ -342,54 +364,58 @@ The trailing slash is required: the profiles concatenate the base path with
 
 ## Resources and tuning for large metagenomes
 
-### The one lever that actually works
+### Read budget
 
-MCAAT builds its graph with no minimum k-mer frequency filter, so every sequencing error contributes
-edges. Graph size — and therefore RAM, disk and runtime — scales with **total sequenced bases**, not
-with community complexity. Deeper sequencing of the same community costs proportionally more.
+MCAAT builds its graph with a minimum k-mer frequency of 1, so every sequencing error contributes
+edges. Graph size, and therefore RAM, disk and runtime, scales with total sequenced bases rather
+than with community complexity. Deeper sequencing of the same community costs proportionally more.
 
-`--subsample_reads` is consequently the pipeline's principal cost control:
+`--subsample_reads` controls that budget:
 
 ```bash
 --subsample_reads 20000000     # 20 M reads per mate
+--subsample_seed  100          # same seed for both mates
 --subsample_reads 0.25         # 25 % of reads
 ```
 
-Halving depth roughly halves the graph. Do this before reaching for larger nodes.
+Halving depth roughly halves the graph.
 
 ### Default resource labels
 
-| Process             | cpus | memory (attempt 1) | time (attempt 1) |
-| ------------------- | ---- | ------------------ | ---------------- |
-| `MCAAT_RUN`         | 8    | 72 GB              | 16 h             |
-| `MCAAT_PHAGECURATE` | 4    | 48 GB              | 24 h             |
+| Process             | Label                | cpus | memory (attempt 1) | time (attempt 1) |
+| ------------------- | -------------------- | ---- | ------------------ | ---------------- |
+| `MCAAT_RUN`         | `process_mcaat_run`  | 8    | 72 GB              | 16 h             |
+| `MCAAT_PHAGECURATE` | `process_phage`      | 4    | 48 GB              | 24 h             |
 
-`memory` and `time` double on each retry; **`cpus` never changes**. That is deliberate: the cycle
-finder allocates one visited-bitset per thread, sized from the number of graph edges, so adding
-cores adds memory linearly. Escalating cores after an out-of-memory kill makes the next attempt
-worse, not better. Fixing `cpus` also pins the number of graph shard files, which keeps `-resume`
-hashes stable across profiles.
+`memory` and `time` are multiplied by `task.attempt` on each retry; `cpus` is fixed and does not
+change on retry. The cycle finder allocates one visited bitset of `(nodes+63)/64` words per thread,
+so memory grows linearly with core count and a higher core count on an out-of-memory retry increases
+peak memory. Fixed `cpus` also pins the number of graph shard files, since the count of
+`graph.sdbg.<N>` files equals `--num_cpu_threads`, which keeps `-resume` hashes and output
+declarations stable across profiles.
+
+Three phases are single-threaded regardless of `cpus`: `RecursiveReduction` over all tips, per-bucket
+bitset zeroing, and the SPOA post-processing stage. Measured throughput plateaus at around 24 cores.
 
 ### Calibrating memory
 
-Because `--ram` has no effect inside MCAAT, the `memory` directive is only the point at which the
-scheduler or cgroup kills the job. It has to be measured rather than derived. Peak resident memory
-is approximately the larger of the two phases (they do not overlap):
+The `memory` directive is the point at which the scheduler or cgroup kills the job. Peak resident
+memory is approximately the larger of the two phases, which do not overlap:
 
 ```
 build   ~  total_bases / 4  +  8 * n_reads          bytes
 detect  ~  2 * n_edges  +  cpus * n_edges / 8       bytes
 ```
 
-Practical procedure:
+Procedure:
 
 1. Run ten representative samples with `-with-report -with-trace`.
-2. For each, `grep 'Memory estimate' work/<hash>/.command.out` — MCAAT prints its own visited-bitset
+2. For each, run `grep 'Memory estimate' work/<hash>/.command.out` to read MCAAT's own visited-bitset
    figure.
 3. Read `peak_rss` from `results/pipeline_info/execution_trace_*.txt`.
 4. Set `memory` to the observed maximum plus about 30 %.
 
-If the trace columns are blank, your container image lacks `ps` (the `procps` package). The
+Blank trace columns indicate a container image without `ps` (the `procps` package). The
 pipeline-owned image includes it; older MCAAT images do not.
 
 ```groovy title="custom_resources.config"
@@ -407,127 +433,134 @@ nextflow run RNABioInfo/mcaat-nf -profile singularity -c custom_resources.config
 
 ### Disk
 
-`MCAAT_RUN` requests `50 GB + 4 × (input GB)`, scaled by attempt. The multiplier covers the 2-bit
-re-encoding of every input read that the graph builder writes (transient, but large), the graph
-shards themselves, `cycles.txt`, and the retained pruned graph.
+`MCAAT_RUN` requests `50 GB + 4 × (input GB)`, scaled by `task.attempt`. The multiplier covers the
+2-bit re-encoding of every input read written by the graph builder (`outfile_prefix.bin`, about
+0.29 bytes per base, transient), the graph shards (about 2 bytes per edge), `cycles.txt`, and the
+retained pruned graph.
 
-Rough retained-graph sizing: about **2 GB of pruned graph per gigabase of input**. For a 100-sample
-cohort at 10 Gbp each that is around 2 TB sitting in `work/`. If that is your binding constraint,
-set `--mcaat_keep_graph false` for the campaign — but read the caching note below first, and be
-aware it makes the phage stage unavailable.
+Retained-graph sizing is about 2 GB of pruned graph per gigabase of input. A 100-sample cohort at
+10 Gbp each occupies around 2 TB in `work/`. Setting `--mcaat_keep_graph false` removes that residue,
+makes the phage stage unavailable, and invalidates cached `MCAAT_RUN` tasks — see
+[Resume behaviour](#resume-behaviour-and-caching).
 
 ### Node-local scratch
 
-If your cluster provides fast node-local storage, set `--mcaat_scratch '$TMPDIR'`. MCAAT writes
-everything relative to its working directory, so relocating the task directory relocates all the
-intermediates. It is off by default because not every site provisions such storage.
+Set `--mcaat_scratch '$TMPDIR'` to use node-local storage. MCAAT writes its `--output-folder`
+relative to the task working directory, so relocating the task directory relocates every
+intermediate. It is off by default because not every site provisions node-local storage.
 
-### Heterogeneous clusters
+### CPU architecture
 
-Use the pipeline's own container image (`quay.io/rnabioinfo/mcaat:1.0.0-portable`). The upstream
-`docker.io/feeka94/mcaat:1.0.0` image is compiled with `-march=native`, so it can die with
-`Illegal instruction` (exit 132) on nodes older than the machine that built it. Exit 132 is
-deliberately never retried, because retrying onto the same node class fails identically.
+The default image `docker.io/feeka94/mcaat:1.0.1` is compiled with `-march=x86-64-v2` and runs on
+heterogeneous clusters. The MCAAT authors' `docker.io/feeka94/mcaat:1.0.0` image is compiled with
+`-march=native` and can abort with `Illegal instruction` (exit 132) on a CPU older than its build
+host. Exit 132 is not retried, since a retry onto the same node class fails identically.
+
+The 1.0.0 image also declares `ENTRYPOINT ["mcaat"]`. Under Docker and Podman the MCAAT processes
+pass `--entrypoint ""`, which keeps that image working; Singularity and Apptainer ignore
+`ENTRYPOINT`.
+
+MCAAT is linux/amd64 only: the vendored megahit rank/select code relies on `__builtin_popcount`
+lowering and spoa pulls `<immintrin.h>`. The `arm` profile runs the images under emulation.
 
 ## Resume behaviour and caching
 
-`-resume` works normally, with a few specifics worth knowing.
+`-resume` works as usual. The specifics below apply to the MCAAT stages.
 
-**Stage toggles do not bust the array-detection cache.** The `MCAAT_RUN` command text deliberately
-contains no reference to `run_phage_curation`, `save_mcaat_graph` or `save_mcaat_cycles`. Those only
-steer publishing. So this sequence costs one graph build, not two:
+**Stage toggles do not change the array-detection cache.** The `MCAAT_RUN` command text contains no
+reference to `run_phage_curation`, `save_mcaat_graph` or `save_mcaat_cycles`; those steer publishing
+only. The following sequence costs one graph build:
 
 ```bash
 # month 1
 nextflow run RNABioInfo/mcaat-nf --input s.csv --outdir results -profile singularity
 
-# month 6 — resumes every MCAAT_RUN from cache, pays only for the phage chain
+# month 6 — resumes every MCAAT_RUN from cache, runs only the phage chain
 nextflow run RNABioInfo/mcaat-nf --input s.csv --outdir results -profile singularity \
     --run_phage_curation -resume
 ```
 
-**`--mcaat_keep_graph` does bust it.** It is the single toggle that changes the resolved command
-text, because graph retention is done in shell inside the task. Decide it once per campaign and do
-not change it mid-study. It is separated from the stage toggle precisely so that everything else
-stays cache-invariant.
+**`--mcaat_keep_graph` changes the cache.** Graph retention is performed in shell inside the task, so
+the toggle changes the resolved command text and invalidates every cached `MCAAT_RUN`. Set it once
+per campaign.
 
-**Changing `cpus` busts it too**, and additionally changes the number of graph shard files. Do not
-retune `process_mcaat_run` cpus partway through a cohort.
+**Changing `cpus` changes the cache** and changes the number of graph shard files. Retuning
+`process_mcaat_run` cpus partway through a cohort forces a rebuild.
 
-**Other things that change the hash:** any MCAAT parameter in the `mcaat_options` group, `mcaat_args`,
-the input files themselves, and the container image tag or digest.
+**Other inputs to the task hash:** any parameter in the `mcaat_options` group, `mcaat_args`, the input
+files themselves, and the container image tag or digest. The `memory` directive is not part of the
+hash, because `--ram` is derived at runtime rather than interpolated from `task.memory`.
 
-**`work/` is not disposable while you rely on published graphs.** With the default
-`--graph_publish_mode symlink`, `arrays/<sample>/graph/` is a symlink into `work/`. `nextflow clean`
-will leave you with dangling links. Use `--graph_publish_mode copy` if the published graph needs to
-outlive the work directory.
+**`work/` and published graphs.** With the default `--graph_publish_mode symlink`,
+`arrays/<sample>/graph/` is a symlink into `work/`, and `nextflow clean` leaves dangling links. Use
+`--graph_publish_mode copy` for a published graph that outlives the work directory.
 
 ## Exit codes and troubleshooting
 
-The pipeline remaps some of MCAAT's exit statuses so that deterministic failures are not retried
-three times before being reported.
+The MCAAT processes replace the nf-core default retry window (130–145 plus 104) with a narrower one:
+`104`, `137`, `140`, `143` and `175`–`177` are retried, `maxRetries = 2`. MCAAT's release `main()`
+aborts with SIGABRT (134) on every CLI and validation error, and a `CycleFinder` `std::bad_alloc`
+aborts with the same status, so the module scripts disambiguate the two by grepping MCAAT's own log
+and remap them before falling through to the raw status.
 
-| Code                             | Meaning                                                | Retried? | What to do                                                                                                              |
-| -------------------------------- | ------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `64`                             | Deterministic MCAAT argument or validation error       | no       | Read `mcaat.log` (published as `arrays/<sample>/<sample>.mcaat.log`) — the real message is there, not in `.command.err`. |
-| `65`                             | Graph build finished but produced no `graph.sdbg_info` | no       | Check FASTQ integrity and R1/R2 record parity. The underlying builder's stderr is suppressed, so `.command.err` will be empty by design. |
-| `137`                            | Allocation failure or OOM kill                         | yes      | Memory doubles on retry. If it still fails, subsample the reads.                                                        |
-| `132`                            | Illegal instruction                                    | no       | The binary was built for a newer CPU than the node. Use the portable image, or pin the queue.                           |
-| `134`                            | Abort that matched no known pattern                    | no       | Unknown deterministic failure — open an issue with `mcaat.log` attached.                                                |
-| `1`                              | Graph-builder fatal error                              | no       | Deterministic. `.command.err` will be empty; inspect the inputs.                                                        |
-| `104`, `140`, `143`, `175`–`177` | Scheduler / walltime kills                             | yes      | Time doubles on retry.                                                                                                  |
+| Code                             | Meaning                                                | Retried | Action                                                                                                                    |
+| -------------------------------- | ------------------------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `64`                             | Deterministic MCAAT argument or validation error, MCAAT exited 0 without writing `parameters.json`, or the phage stage found no `graph.sdbg_info` | no | Read `mcaat.log`, published as `arrays/<sample>/<sample>.mcaat.log`. The message is there, not in `.command.err`.         |
+| `65`                             | Graph build finished but produced no `graph.sdbg_info` | no      | Check FASTQ integrity and R1/R2 record parity. The graph builder's stderr is redirected to `/dev/null`, so `.command.err` is empty. |
+| `137`                            | Allocation failure (`std::bad_alloc`) or OOM kill      | yes     | Memory doubles on retry. If it still fails, subsample the reads.                                                          |
+| `132`                            | Illegal instruction                                    | no      | The binary was built for a newer CPU than the node. Use the default image, or pin the queue.                              |
+| `134`                            | Abort matching neither log pattern                     | no      | Open an issue with `mcaat.log` attached.                                                                                  |
+| `1`                              | Graph-builder fatal error                              | no      | `.command.err` is empty; inspect the inputs.                                                                              |
+| `104`, `140`, `143`, `175`–`177` | Scheduler and walltime kills                           | yes     | Time doubles on retry.                                                                                                    |
 
-**"My sample disappeared from the results."** Look for a `MCAAT-NF: EXCLUDING sample` line in the
+`MCAAT_PHAGECURATE` retries twice and its third failure is ignored rather than failing the run.
+
+**A sample is missing from the results.** Look for a `MCAAT-NF: EXCLUDING sample` line in the
 Nextflow log: the pair-sync gate dropped it because R1 and R2 had different record counts.
 
-**"A sample reports zero arrays."** That is a legitimate result and is reported explicitly — the
-sample gets a header-only `CRISPR_Arrays_1.txt`, a zero row in `reports/cohort_summary.tsv`, and a
-`0` in the MultiQC General Statistics table. It is never silently dropped.
+**A sample reports zero arrays.** Zero arrays is a reported result. The sample gets a header-only
+`CRISPR_Arrays_1.txt`, a zero row in `reports/cohort_summary.tsv`, and a `0` in the MultiQC General
+Statistics table. MCAAT expresses the zero case three ways — no `CRISPR_Arrays_*.txt` when no spacers
+were extracted, none when `cycles.txt` is unreadable, and a header-only file when all candidates were
+filtered out — and the module normalises the first two into the third.
 
-**"`-profile test` fails immediately."** The test-data repository does not exist yet; see
+**`-profile test` fails immediately.** The test-data repository does not exist yet; see
 [Test profiles and test data](#test-profiles-and-test-data).
 
-**"Where is the real error message?"** For the array-detection step, in `mcaat.log` / `.command.out`.
-MCAAT redirects the graph builder's stderr to `/dev/null`, so an empty `.command.err` is expected
-even for genuine failures.
+**Locating the error message.** For the array-detection step it is in `mcaat.log` and
+`.command.out`. MCAAT redirects the graph builder's stderr to `/dev/null`, so `.command.err` is empty
+for graph-build failures.
 
 ## Core Nextflow arguments
 
 > [!NOTE]
-> These are Nextflow's own options and use a _single_ hyphen.
+> These are Nextflow's own options and take a single hyphen.
 
 ### `-profile`
 
-Use one of the container profiles. The template's `conda` profile exists but cannot run the
-detection step, because MCAAT has no Bioconda package.
+Container profiles: `docker`, `singularity`, `podman`, `apptainer`, `charliecloud`, `shifter`,
+`wave`. The `arm` profile adds `--platform=linux/amd64` under Docker for emulated runs. The `conda`
+and `mamba` profiles cannot run the MCAAT stages.
 
-- `docker`
-- `singularity`
-- `podman`
-- `apptainer`
-- `charliecloud`
-- `wave`
+Test profiles: `test`, `test_phage`, `test_graph`, `test_full`. See
+[Test profiles and test data](#test-profiles-and-test-data).
 
-Test profiles: `test`, `test_phage`, `test_graph`, `test_full`. None of them can run until the
-test-data repository exists — see [above](#test-profiles-and-test-data).
-
-Profiles are applied left to right, so put the container profile last:
-`-profile test,docker`.
+Profiles are applied left to right, so the container profile goes last: `-profile test,docker`.
 
 ### `-resume`
 
-Restart from cached results. See [Resume behaviour](#resume-behaviour-and-caching). You can also
-resume a specific earlier run by name or session ID (`nextflow log` lists them).
+Restart from cached results. See [Resume behaviour](#resume-behaviour-and-caching). A specific
+earlier run can be resumed by name or session ID; `nextflow log` lists them.
 
 ### `-c`
 
-Supply extra _configuration_ (not parameters).
+Supply extra configuration, not parameters.
 
 ## Custom configuration
 
 ### Per-process resources
 
-Requests are per-process, using labels. To change one process rather than a whole label:
+Resource requests are set per label. To change one process:
 
 ```groovy
 process {
@@ -538,8 +571,8 @@ process {
 }
 ```
 
-If a step is failing at exit 137 or 140, that is the mechanism to reach for. See the nf-core guide
-on [tuning workflow resources](https://nf-co.re/docs/usage/configuration#tuning-workflow-resources).
+Use this mechanism for steps failing at exit 137 or 140. See the nf-core guide on
+[tuning workflow resources](https://nf-co.re/docs/usage/configuration#tuning-workflow-resources).
 
 ### Running in the background
 
@@ -547,11 +580,11 @@ on [tuning workflow resources](https://nf-co.re/docs/usage/configuration#tuning-
 nextflow run RNABioInfo/mcaat-nf -profile singularity --input s.csv --outdir results -bg
 ```
 
-Or run it under `screen`/`tmux`, or submit the Nextflow process itself as a job.
+Alternatives: run under `screen` or `tmux`, or submit the Nextflow process itself as a job.
 
 ### Nextflow memory
 
-Nextflow's own JVM can be capped:
+Cap Nextflow's own JVM:
 
 ```bash
 export NXF_OPTS='-Xms1g -Xmx4g'

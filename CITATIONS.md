@@ -4,18 +4,18 @@
 
 > Talibli F, Voß B. MCAAT: Metagenomic CRISPR Array Analysis Tool. _microLife_. 2025. doi: [10.1093/femsml/uqaf016](https://doi.org/10.1093/femsml/uqaf016).
 
-MCAAT is the tool this pipeline orchestrates. It detects CRISPR arrays directly in
-un-assembled metagenomic reads by building a succinct de Bruijn graph and finding
-multicycles in it. **If you use this pipeline, cite MCAAT.**
+MCAAT is the tool this pipeline orchestrates. It detects CRISPR arrays directly in un-assembled
+metagenomic reads by building a succinct de Bruijn graph and finding multicycles in it. Cite MCAAT
+when you use this pipeline.
 
-MCAAT vendors and links the following components, which should be cited alongside it
-when the array-detection stage is used:
+MCAAT vendors and links the following components. Cite them alongside MCAAT when the
+array-detection stage is used.
 
-- **MEGAHIT** (succinct de Bruijn graph construction)
+- **MEGAHIT** — succinct de Bruijn graph construction.
 
   > Li D, Liu CM, Luo R, Sadakane K, Lam TW. MEGAHIT: an ultra-fast single-node solution for large and complex metagenomics assembly via succinct de Bruijn graph. _Bioinformatics_. 2015 May 15;31(10):1674-6. doi: [10.1093/bioinformatics/btv033](https://doi.org/10.1093/bioinformatics/btv033). PubMed PMID: [25609793](https://pubmed.ncbi.nlm.nih.gov/25609793/).
 
-- **SPOA** (partial order alignment, used for repeat/spacer consensus in post-processing)
+- **SPOA** — partial order alignment, used for repeat and spacer consensus in post-processing.
 
   > Vaser R, Sović I, Nagarajan N, Šikić M. Fast and accurate de novo genome assembly from long uncorrected reads. _Genome Research_. 2017 May;27(5):737-746. doi: [10.1101/gr.214270.116](https://doi.org/10.1101/gr.214270.116). PubMed PMID: [28100585](https://pubmed.ncbi.nlm.nih.gov/28100585/).
 
@@ -29,8 +29,8 @@ when the array-detection stage is used:
 
   > Ewels PA, Peltzer A, Fillinger S, Patel H, Alneberg J, Wilm A, Garcia MU, Di Tommaso P, Nahnsen S. The nf-core framework for community-curated bioinformatics pipelines. _Nature Biotechnology_. 2020 Feb 13;38(3):276-278. doi: [10.1038/s41587-020-0439-x](https://doi.org/10.1038/s41587-020-0439-x). PubMed PMID: [32055031](https://pubmed.ncbi.nlm.nih.gov/32055031/).
 
-  `mcaat-nf` is built **with** the nf-core template and tooling but is **not** an
-  nf-core pipeline. Please do not refer to it as `nf-core/mcaat-nf`.
+  `mcaat-nf` is built with the nf-core template and tooling and is not an nf-core pipeline. Refer to
+  it as `RNABioInfo/mcaat-nf`, not as `nf-core/mcaat-nf`.
 
 ## Pipeline tools
 
@@ -64,23 +64,22 @@ when the array-detection stage is used:
 
 - [seqtk](https://github.com/lh3/seqtk) — deterministic paired subsampling (`--subsample_reads`).
 
-- [Python](https://www.python.org/) — the three helper scripts this pipeline ships in
-  `bin/`. All three are standard-library only; no third-party Python package is
-  installed or required.
+- [Python](https://www.python.org/) — the three helper scripts in `bin/`. All three use the standard
+  library only; no third-party Python package is installed or required.
 
   > Van Rossum G, Drake FL. Python 3 Reference Manual. Scotts Valley, CA: CreateSpace; 2009.
 
-  | Script                        | Role                                                                                                                     |
-  | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-  | `bin/mcaat_parse_arrays.py`   | Parses MCAAT's `CRISPR_Arrays_*.txt` into `<sample>.arrays.tsv`, `<sample>.spacers.fasta` and `<sample>.provenance.tsv`, and performs the `parameters.json` readback assertion. |
-  | `bin/mcaat_aggregate.py`      | Builds the cohort tables: cohort arrays, per-sample summary, pairwise spacer sharing, spacer redundancy and repeat families. |
-  | `bin/mcaat_multiqc_sections.py` | Renders those cohort tables as MultiQC custom content (`mcaat_*_mqc.tsv` / `.yaml`).                                     |
+  | Script                          | Role                                                                                                                                                                          |
+  | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `bin/mcaat_parse_arrays.py`     | Parses MCAAT's `CRISPR_Arrays_*.txt` into `<sample>.arrays.tsv`, `<sample>.spacers.fasta` and `<sample>.provenance.tsv`, and performs the `parameters.json` readback assertion. |
+  | `bin/mcaat_aggregate.py`        | Builds the cohort tables: cohort arrays, per-sample summary, pairwise spacer sharing, spacer redundancy and repeat families.                                                    |
+  | `bin/mcaat_multiqc_sections.py` | Renders the cohort tables as MultiQC custom content (`mcaat_*_mqc.tsv` / `.yaml`).                                                                                              |
 
 ## Reference data distributed with this pipeline
 
 - `assets/phix174.fasta.gz` is the Enterobacteria phage phiX174 reference genome, NCBI accession [NC_001422.1](https://www.ncbi.nlm.nih.gov/nuccore/NC_001422.1) (public domain). It is the default `--phix_reference` for the optional BBDuk scrub.
 
-That is the only reference dataset shipped here.
+This is the only reference dataset shipped in this repository.
 
 ## Software packaging and containerisation tools
 
