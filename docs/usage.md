@@ -94,7 +94,7 @@ The pipeline therefore:
   dispatched. Samples that fail this check are excluded from the run with an explicit message and
   the rest of the cohort continues.
 
-You can disable that assertion with `--skip_pairsync_check`, but there is no good reason to.
+You can disable that assertion with `--skip_pairsync_check`.
 
 ## Running the pipeline
 
@@ -242,11 +242,9 @@ Both cohort thresholds are rendered into the `COHORT_SUMMARISE` command line as
 `--min-spacer-sharing` / `--min-spacer-redundancy`. `ext.args` is appended after them, so a config
 can still override either value without the module knowing about it.
 
-### Parameters that deliberately do not exist
+### Settings that are not configurable
 
-These are the ones people ask for. Each is absent because exposing it would be a lie:
-
-| Not exposed                                | Why                                                                                                                                                                                                                                                        |
+| Setting                                    | Why                                                                                                                                                                                                                                                        |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | k-mer size                                 | Hard-coded to 23 in the graph build. This is also why `mcaat_min_repeat_len` cannot go below 23.                                                                                                                                                            |
 | minimum k-mer frequency                    | Hard-coded to 1, i.e. no error-k-mer filtering. This is why resource use tracks total sequenced bases.                                                                                                                                                      |

@@ -26,15 +26,6 @@ The pipeline wraps that detection step in the things a real study needs around i
 control, per-sample parsing into machine-readable tables, cross-sample spacer and repeat
 aggregation, and a single MultiQC report.
 
-### Scope
-
-- **Protospacer / phage curation is experimental and off by default.** It is enabled only with
-  `--run_phage_curation`, it wraps an unreleased MCAAT subcommand, and it is configured to be
-  retried twice and then ignored rather than fail a cohort. Treat its output as a lead, not a
-  result.
-- **No spacer–protospacer database search.** The pipeline hands you a clean, addressable spacer
-  FASTA; matching it against viral or plasmid databases is left to you.
-
 ## Pipeline summary
 
 1. **Merge sequencing runs** ([`cat`](https://www.gnu.org/software/coreutils/)) — rows in the

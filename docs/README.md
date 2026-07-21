@@ -12,8 +12,7 @@ The RNABioInfo/mcaat-nf documentation is split into the following pages:
 
 The rationale for the way the pipeline is shaped — the module boundaries and the reason each
 workaround exists — lives next to the code it justifies, in the comment blocks of
-`modules/local/**/main.nf`. There is no separate design document; a standalone spec drifts from
-the implementation and there is no way to tell which of the two is lying.
+`modules/local/**/main.nf`.
 
 There is no `CONTRIBUTING.md` yet. Until there is, open an issue on the
 [repository tracker](https://github.com/RNABioInfo/mcaat-nf/issues) before starting work on a
