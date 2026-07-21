@@ -257,7 +257,7 @@ can override either value.
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | k-mer size                                 | Hard-coded to 23 in the graph build. `mcaat_min_repeat_len` cannot go below 23 for the same reason.                                                                                                     |
 | minimum k-mer frequency                    | Hard-coded to 1, so no error-k-mer filtering takes place. Resource use tracks total sequenced bases.                                                                                                    |
-| `--ram`                                    | Derived inside the task at runtime as 90 % of the cgroup memory limit, with a 2 GB floor, falling back to `/proc/meminfo` when no cgroup limit is set. It is not interpolated from `task.memory`, so retuning the `memory` directive does not change the task hash. The clamp keeps MCAAT's `ram <= 1.0` and `ram > total system RAM` validation branches unreachable; both route into an interactive stdin prompt. |
+| `--ram`                                    | Not passed. MCAAT defaults it to 95 % of system RAM. That figure is a ceiling for the graph builder, not a reservation: the sorting buffer is sized from the data and the ceiling only binds if the data needs more. |
 | `--threads`                                | Derived from `task.cpus` and clamped to `nproc`. MCAAT rejects a thread count above `std::thread::hardware_concurrency()` and routes that failure into the interactive prompt.                          |
 | `--autoclean`                              | Always `false`. The default is `true` and recursively deletes `<out>/graph`. Cleanup is done by the pipeline in shell, so the resolved command text does not change when a stage toggle is flipped.     |
 | `--output-folder`                          | Always `mcaat`, a subdirectory inside the task directory. The MCAAT default is a localtime-derived `mcaat_run_<timestamp>` name.                                                                        |
@@ -487,7 +487,7 @@ per campaign.
 
 **Other inputs to the task hash:** any parameter in the `mcaat_options` group, `mcaat_args`, the input
 files themselves, and the container image tag or digest. The `memory` directive is not part of the
-hash, because `--ram` is derived at runtime rather than interpolated from `task.memory`.
+hash, because `--ram` is not passed to MCAAT at all.
 
 **`work/` and published graphs.** With the default `--graph_publish_mode symlink`,
 `arrays/<sample>/graph/` is a symlink into `work/`, and `nextflow clean` leaves dangling links. Use

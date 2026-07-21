@@ -96,51 +96,6 @@ process MCAAT_RUN {
         mcaat: \$(echo "\${MCAAT_VERSION:-1.0.0}")
     END_VERSIONS
 
-    # ------------------------------------------------------------------
-    # Resource derivation is done HERE, in bash, and deliberately NOT
-    # interpolated from task.memory.
-    #
-    # WHY NOT task.memory: interpolating it would put the memory directive
-    # into the resolved script text, and hence into the task hash. Retuning
-    # the process_mcaat_run label -- or any retry that scales memory -- would
-    # then invalidate every cached MCAAT_RUN and force a full SDBG rebuild of
-    # the entire cohort. Reading the limit at RUNTIME gives the same number
-    # without touching the hash. DO NOT reintroduce a task.memory
-    # interpolation here.
-    #
-    # WHY THE CGROUP AND NOT /proc/meminfo: --ram used to be inert (a gigabyte
-    # figure was passed to megahit's byte-valued --host_mem), so the value we
-    # sent did not matter and host memory was a safe thing to derive from.
-    # As of the pinned 1.0.1 container that bug is FIXED and megahit now
-    # honours the number. /proc/meminfo still reports HOST memory inside a
-    # container -- cgroups are not virtualised there -- so deriving from it
-    # would now hand megahit a budget many times the container's actual limit
-    # and get the task OOM-killed. Read the cgroup limit instead, falling back
-    # to host memory only when unconstrained.
-    #
-    # The clamp also keeps MCAAT's two validation traps unreachable: `ram <=
-    # 1.0` and `ram > get_total_system_ram()` (src/main.cpp:513-520) both route
-    # into the interactive stdin prompt or an uncaught throw. A cgroup limit is
-    # always <= host total, so the upper trap cannot fire.
-    # ------------------------------------------------------------------
-    LIMIT_B=""
-    if [ -r /sys/fs/cgroup/memory.max ]; then
-        V=\$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)
-        if [ "\$V" != "max" ]; then LIMIT_B="\$V"; fi
-    fi
-    if [ -z "\$LIMIT_B" ] && [ -r /sys/fs/cgroup/memory/memory.limit_in_bytes ]; then
-        V=\$(cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || echo 0)
-        # cgroup v1 reports a near-INT64_MAX sentinel when unlimited.
-        if [ "\$V" -gt 0 ] 2>/dev/null && [ "\$V" -lt 4611686018427387904 ] 2>/dev/null; then
-            LIMIT_B="\$V"
-        fi
-    fi
-    if [ -z "\$LIMIT_B" ]; then
-        LIMIT_B=\$(awk '/^MemTotal:/ {print \$2 * 1024}' /proc/meminfo 2>/dev/null || echo 0)
-    fi
-    RAM_G=\$(awk -v b="\$LIMIT_B" 'BEGIN { v = int(b / 1073741824 * 0.9); if (v < 2) v = 2; print v }')
-    echo "MCAAT_RUN: memory limit \${LIMIT_B} B -> --ram \${RAM_G}G" >&2
-
     # MCAAT REJECTS --threads greater than std::thread::hardware_concurrency()
     # and routes that failure into the interactive prompt. nproc honours the
     # CPU affinity mask, so clamping here makes that branch unreachable.
@@ -183,7 +138,6 @@ process MCAAT_RUN {
     mcaat \\
         --output-folder mcaat \\
         --threads "\$THREADS" \\
-        --ram "\${RAM_G}G" \\
         --autoclean false \\
         --threshold-multiplicity ${thr_mult} \\
         --cycle-min-length ${cycle_min} \\

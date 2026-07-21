@@ -22,7 +22,7 @@ pipeline.
   to stderr.
 - `MCAAT_RUN`: CRISPR array detection in un-assembled reads. The wrapper applies:
   - `< /dev/null` on every invocation;
-  - bash-derived `--threads` and `--ram`;
+  - bash-derived `--threads`;
   - a dedicated `--output-folder`;
   - `--input-files` placed last on the command line;
   - a log-content exit-code remap;

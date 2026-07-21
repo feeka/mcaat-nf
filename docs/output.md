@@ -76,7 +76,7 @@ The final three columns are provenance echoed from MCAAT's `parameters.json` by 
 | `pct_spacers_shared`           | float  | `100 × n_spacers_shared / n_spacers_unique`, two decimal places; `0.00` when there are no spacers. |
 | `n_repeats_shared`             | int    | Consensus repeats also seen in at least one other sample.                       |
 | `mcaat_threads`                | string | Thread count MCAAT resolved, from `parameters.json`.                            |
-| `mcaat_ram_gb`                 | string | The `--ram` figure MCAAT was given, which megahit uses as its memory budget.     |
+| `mcaat_ram_gb`                 | string | The memory ceiling MCAAT used, its own default of 95 % of system RAM.           |
 | `mcaat_threshold_multiplicity` | string | Multiplicity threshold MCAAT resolved.                                          |
 
 ```tsv

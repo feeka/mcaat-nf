@@ -121,7 +121,7 @@
                         "number"
                     ],
                     "description": "Read budget cap passed to `seqtk sample`. An integer means N reads per mate; a float between 0 and 1 means a fraction.",
-                    "help_text": "This is the pipeline's ONLY lever on MCAAT's resource envelope. MCAAT builds its SDBG with a hard-coded minimum k-mer count of 1, so every sequencing error k-mer is retained and graph size, RAM and disk all scale with total sequenced bases rather than with community complexity. `--ram` is functionally inert inside MCAAT and cannot be used to cap anything.",
+                    "help_text": "This is the pipeline's ONLY lever on MCAAT's resource envelope. MCAAT builds its SDBG with a hard-coded minimum k-mer count of 1, so every sequencing error k-mer is retained and graph size, RAM and disk all scale with total sequenced bases rather than with community complexity.",
                     "minimum": 0,
                     "fa_icon": "fas fa-cut"
                 },
@@ -147,7 +147,7 @@
             "type": "object",
             "fa_icon": "fas fa-project-diagram",
             "description": "Tunables for the MCAAT succinct de Bruijn graph build and CRISPR array detection.",
-            "help_text": "Only genuinely live MCAAT flags are exposed here. The k-mer size (23) and the minimum k-mer frequency (1) are hard-coded in the graph build; `--ram`, `--threads`, `--autoclean`, `--output-folder`, `--settings` and `--benchmark` are derived, hard-wired or inert and are deliberately not exposed. See docs/usage.md for the full list and the reasoning.",
+            "help_text": "Only genuinely live MCAAT flags are exposed here. The k-mer size (23) and the minimum k-mer frequency (1) are hard-coded in the graph build; `--ram` is left at MCAAT's own default; `--threads`, `--autoclean` and `--output-folder` are set by the pipeline. See docs/usage.md.",
             "properties": {
                 "mcaat_min_spacer_len": {
                     "type": "integer",
