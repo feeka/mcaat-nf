@@ -20,20 +20,13 @@ This repository has no `CONTRIBUTING.md`. Before starting work on a pull request
 2. Run `nf-test test`.
 3. Run the pre-commit hooks.
 
-## Relationship to nf-core
+## nf-core template
 
-This pipeline is built with the [nf-core](https://nf-co.re) template and follows nf-core
-conventions: module structure, `nextflow_schema.json`, nf-test, linting and the standard container
-profiles. It is not an nf-core pipeline. It is developed and maintained in the `RNABioInfo`
-organisation, outside the nf-core organisation and outside its review process.
+The repository layout, `nextflow_schema.json`, nf-test setup and container profiles come from the
+[nf-core](https://nf-co.re) template. `.nf-core.yml` sets `is_nfcore: false`, so some lint checks
+are configured differently from pipelines inside that organisation.
 
-- Refer to it as `RNABioInfo/mcaat-nf`, not as `nf-core/mcaat-nf`.
-- It does not use the nf-core logo or branding.
-- Send issues and support requests to
-  [this repository's tracker](https://github.com/RNABioInfo/mcaat-nf/issues), not to nf-core Slack
-  or the nf-core issue trackers.
-- `.nf-core.yml` sets `is_nfcore: false`. Some nf-core lint checks are therefore configured
-  differently from a pipeline inside the organisation.
+Issues go to [this repository's tracker](https://github.com/RNABioInfo/mcaat-nf/issues).
 
 ## Licensing
 

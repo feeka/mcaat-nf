@@ -6,20 +6,16 @@
 [![run with docker](https://img.shields.io/badge/run%20with-docker-0db7ed?labelColor=000000&logo=docker)](https://www.docker.com/)
 [![run with singularity](https://img.shields.io/badge/run%20with-singularity-1d355c.svg?labelColor=000000)](https://sylabs.io/docs/)
 
-> **This is not an nf-core pipeline.** It is built with the nf-core template and follows nf-core
-> conventions, but it is developed and maintained outside the nf-core organisation. Refer to it as
-> `RNABioInfo/mcaat-nf`, never as `nf-core/mcaat-nf`.
-
 ## Introduction
 
-**RNABioInfo/mcaat-nf** discovers CRISPR arrays directly in raw, unassembled metagenomic reads and
-aggregates those discoveries across a cohort of samples. Detection is performed by
-[MCAAT](https://github.com/RNABioInfo/mcaat), which builds a succinct de Bruijn graph over the reads
-and identifies multicycles, the structural signature a repeat–spacer array leaves in a de Bruijn
-graph. No assembly, binning or reference database is used, so arrays are recovered from
-low-abundance community members that do not appear in an assembly. Around that detection step the
-pipeline runs read quality control, per-sample parsing into machine-readable tables, cross-sample
-spacer and repeat aggregation, and a single MultiQC report.
+A Nextflow pipeline that runs [MCAAT](https://github.com/RNABioInfo/mcaat) over a set of samples.
+
+MCAAT finds CRISPR arrays in raw, un-assembled metagenomic reads. It builds a succinct de Bruijn
+graph and detects multicycles - the structural signature of CRISPR repeat-spacer arrays - without
+any prior assembly step.
+
+The pipeline adds read quality control, parses MCAAT's output into TSV and FASTA files, aggregates
+spacers and repeats across samples, and produces a MultiQC report.
 
 ## Requirements
 
@@ -81,11 +77,10 @@ sample.
 > For Nextflow installation, see [this page](https://nf-co.re/docs/usage/installation).
 
 > [!IMPORTANT]
-> `-profile test` is not yet runnable. Every test profile resolves its samplesheet from
-> `params.pipelines_testdata_base_path`, which points at
-> `https://raw.githubusercontent.com/RNABioInfo/mcaat-nf-testdata/main/`. That repository does not
-> exist yet and has to be created and populated before any `test*` profile can run. The required
-> layout is in [`docs/usage.md`](docs/usage.md#test-profiles-and-test-data).
+> `-profile test` does not work yet. It downloads its test data from
+> `https://raw.githubusercontent.com/RNABioInfo/mcaat-nf-testdata/main/`, which does not exist.
+> The required files are listed in [`docs/usage.md`](docs/usage.md#test-profiles-and-test-data).
+> Running on your own data does not need this.
 
 ### Samplesheet
 
