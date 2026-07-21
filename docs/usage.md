@@ -34,8 +34,6 @@ Requirements:
 | Nextflow         | `>=25.10.4`                                                             |
 | Container engine | Docker, Singularity / Apptainer, Podman or Charliecloud                 |
 
-MCAAT has no Bioconda package and its processes declare no Conda environment. The `conda` profile
-inherited from the nf-core template runs the QC and reporting layers only; it cannot run the
 array-detection or phage stages.
 
 ## Samplesheet input
@@ -539,8 +537,7 @@ for graph-build failures.
 ### `-profile`
 
 Container profiles: `docker`, `singularity`, `podman`, `apptainer`, `charliecloud`, `shifter`,
-`wave`. The `arm` profile adds `--platform=linux/amd64` under Docker for emulated runs. The `conda`
-and `mamba` profiles cannot run the MCAAT stages.
+`wave`. The `arm` profile adds `--platform=linux/amd64` under Docker for emulated runs.
 
 Test profiles: `test`, `test_phage`, `test_graph`, `test_full`. See
 [Test profiles and test data](#test-profiles-and-test-data).

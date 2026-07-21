@@ -69,8 +69,7 @@ lint:
     # `nf-core pipelines lint` diffs 674 lines of GPL-3 against the template's
     # short MIT text and fails on every push, including `--release` on main.
     - LICENSE
-    # Deliberately diverged from the template: the nf-test matrix drops the conda
-    # profile (MCAAT has no Bioconda recipe) and keeps
+    # Deliberately diverged from the template: the nf-test matrix keeps
     # BOTH docker and singularity on every branch, because the ENTRYPOINT class of
     # container bug is fatal under docker and completely invisible under singularity.
     # The path is exact: the workflow MUST be called nf-test.yml, because that is

@@ -30,10 +30,6 @@ spacer and repeat aggregation, and a single MultiQC report.
 | MCAAT image      | `docker.io/feeka94/mcaat:1.0.1` (`--mcaat_container`)                          |
 | Architecture     | The MCAAT image is `linux/amd64` only; on ARM hosts use `-profile arm`         |
 
-The `conda` and `mamba` profiles cover the QC and reporting layers only. MCAAT has no Bioconda
-recipe, so the MCAAT processes carry no `conda` directive and the array and phage stages do not run
-under those profiles.
-
 ## Pipeline summary
 
 1. **Merge sequencing runs** ([`cat`](https://www.gnu.org/software/coreutils/)) — samplesheet rows
@@ -176,8 +172,7 @@ Bugs in the detection tool itself, rather than in the workflow around it, belong
 
 If you use RNABioInfo/mcaat-nf for your analysis, cite the MCAAT paper:
 
-> **Metagenomic CRISPR array analysis directly from unassembled reads.**
-> _MicroLife_, 2025. doi: [10.1093/femsml/uqaf016](https://doi.org/10.1093/femsml/uqaf016)
+> Talibli F, Voß B. **Metagenomic CRISPR Array Analysis Tool: a novel graph-based approach to finding CRISPR arrays in metagenomic datasets.** _microLife_, 2025. doi: [10.1093/femsml/uqaf016](https://doi.org/10.1093/femsml/uqaf016)
 
 References for the tools used by the pipeline are listed in
 [`CITATIONS.md`](CITATIONS.md).

@@ -109,7 +109,7 @@ The MCAAT version is the tag of the pinned image in `params.mcaat_container`
 from the `MCAAT_VERSION` environment variable baked into that image. The `coreutils` row is the
 version `CAT_FASTQ` reports as `cat`. Every row other than `MCAAT` and `python` is the version
 pinned in the corresponding nf-core module's `environment.yml`, and the container images are the
-matching Wave builds. `python` is pinned in the `conda` and `container` directives of the two local
+matching Wave builds. `python` is pinned in the `container` directives of the two local
 Python modules, `modules/local/mcaat/parsearrays/main.nf` and `modules/local/cohort_summarise/main.nf`.
 
 Some images are multi-tool. The `bbmap` image also carries `pigz` 2.8. The `bowtie2` image also
@@ -138,8 +138,6 @@ Not applicable to the initial release.
   workarounds those modules carry — the exit-code remap, the `< /dev/null` stdin guard, the megahit
   intermediate prune and the zero-result normalisation — are exercised only through the end-to-end
   runs.
-- The `conda` profile cannot run the array or phage stages. MCAAT has no Bioconda recipe, so those
-  processes declare no `conda` directive. The `conda` profile is excluded from the CI matrix.
 - `linux/amd64` only. MCAAT's vendored megahit rank/select relies on `__builtin_popcount` lowering
   and spoa pulls `<immintrin.h>`; there is no arm64 build. The `arm` profile runs the images under
   emulation.

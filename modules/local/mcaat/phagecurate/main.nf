@@ -13,7 +13,6 @@ process MCAAT_PHAGECURATE {
     tag "${meta.id}"
     label 'process_phage'
 
-    // No `conda` directive -- MCAAT has no Bioconda recipe.
     container "${workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container
         ? 'docker://' + params.mcaat_container
         : params.mcaat_container}"

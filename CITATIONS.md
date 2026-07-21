@@ -2,7 +2,7 @@
 
 ## [MCAAT](https://github.com/RNABioInfo/mcaat)
 
-> Talibli F, Voß B. MCAAT: Metagenomic CRISPR Array Analysis Tool. _microLife_. 2025. doi: [10.1093/femsml/uqaf016](https://doi.org/10.1093/femsml/uqaf016).
+> Talibli F, Voß B. Metagenomic CRISPR Array Analysis Tool: a novel graph-based approach to finding CRISPR arrays in metagenomic datasets. _microLife_. 2025. doi: [10.1093/femsml/uqaf016](https://doi.org/10.1093/femsml/uqaf016).
 
 MCAAT is the tool this pipeline orchestrates. It detects CRISPR arrays directly in un-assembled
 metagenomic reads by building a succinct de Bruijn graph and finding multicycles in it. Cite MCAAT
@@ -82,14 +82,6 @@ array-detection stage is used.
 This is the only reference dataset shipped in this repository.
 
 ## Software packaging and containerisation tools
-
-- [Anaconda](https://anaconda.com)
-
-  > Anaconda Software Distribution. _Computer software_. Vers. 2-2.4.0. Anaconda, 2016.
-
-- [Bioconda](https://bioconda.github.io/)
-
-  > Grüning B, Dale R, Sjödin A, Chapman BA, Rowe J, Tomkins-Tinch CH, Valieris R, Köster J; Bioconda Team. Bioconda: sustainable and comprehensive software distribution for the life sciences. _Nature Methods_. 2018 Jul;15(7):475-476. doi: [10.1038/s41592-018-0046-7](https://doi.org/10.1038/s41592-018-0046-7). PubMed PMID: [29967506](https://pubmed.ncbi.nlm.nih.gov/29967506/).
 
 - [BioContainers](https://biocontainers.pro/)
 

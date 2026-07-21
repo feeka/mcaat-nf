@@ -7,11 +7,7 @@ name: nf-test
 # waives it under `lint.files_unchanged` because the matrix below deliberately
 # diverges from the stock template in two ways:
 #
-#   1. `conda` is NOT in the profile matrix. MCAAT has no Bioconda recipe,
-#      so a conda job could never resolve the MCAAT processes. Re-enable the
-#      moment a recipe exists.
-#
-#   2. `docker` AND `singularity` both run on every PR, not just on PRs to
+#   1. `docker` AND `singularity` both run on every PR, not just on PRs to
 #      main. This is not belt-and-braces: the upstream MCAAT image sets
 #      ENTRYPOINT ["mcaat"], which is FATAL under the Docker executor
 #      (Nextflow's `/bin/bash -ue .command.sh` becomes arguments to mcaat,

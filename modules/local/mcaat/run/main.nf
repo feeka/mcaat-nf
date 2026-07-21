@@ -13,11 +13,6 @@ process MCAAT_RUN {
     tag "${meta.id}"
     label 'process_mcaat_run'
 
-    // ------------------------------------------------------------------
-    // No `conda` directive: MCAAT has no Bioconda recipe yet. One is blocked
-    // on three upstream changes (FetchContent network access at configure
-    // time, unrecursed submodules, and a missing install() rule).
-    // ------------------------------------------------------------------
     container "${workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container
         ? 'docker://' + params.mcaat_container
         : params.mcaat_container}"
