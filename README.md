@@ -58,18 +58,18 @@ spacers and repeats across samples, and produces a MultiQC report.
 
 ### Phage curation stage
 
-Step 11 wraps `mcaat phage-curate`, a subcommand on MCAAT's unreleased v2.0.0 track.
+Step 11 runs `mcaat phage-curate`. This subcommand is part of the unreleased MCAAT v2.0.0 and is
+off by default.
 
-| Property             | Value                                                                                  |
-| -------------------- | -------------------------------------------------------------------------------------- |
-| Default state        | Disabled; enable with `--run_phage_curation`                                             |
-| Additional required  | `--mcaat_keep_graph true` (the default). The stage takes the succinct graph as input.      |
-| Search               | Recursive graph traversal with no depth cap and no wall-clock limit; runtime scales with graph density |
-| Error strategy       | Retry twice, then ignore. An ignored task does not fail the run.                          |
-| Output               | `phage/<sample>/<sample>.phage_contigs.fasta`, optional                                   |
+Enable it with `--run_phage_curation`. It reads the de Bruijn graph built in step 9, so
+`--mcaat_keep_graph` must stay `true` (the default).
 
-When a sample has no `phage_contigs.fasta`, check the Nextflow log for an ignored task for that
-sample.
+The search has no time limit and no limit on how far it walks through the graph. On a large or
+complex graph it can run for a very long time.
+
+If the step fails for a sample, the pipeline runs it twice more, then gives up on that sample and
+carries on with the rest. The run does not fail. That sample gets no
+`phage/<sample>/<sample>.phage_contigs.fasta` file; the reason is in the Nextflow log.
 
 ## Usage
 
