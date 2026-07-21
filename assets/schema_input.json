@@ -1,0 +1,64 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/RNABioInfo/mcaat-nf/main/assets/schema_input.json",
+    "title": "RNABioInfo/mcaat-nf pipeline - params.input schema",
+    "description": "Schema for the samplesheet CSV provided with params.input",
+    "type": "array",
+    "uniqueEntries": ["sample", "run"],
+    "items": {
+        "type": "object",
+        "properties": {
+            "sample": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Sample name must be provided and cannot contain spaces",
+                "meta": ["id"]
+            },
+            "run": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Run/lane identifier cannot contain spaces",
+                "meta": ["run"]
+            },
+            "fastq_1": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "pattern": "^\\S+\\.f(ast)?q(\\.gz)?$",
+                "errorMessage": "FASTQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq', '.fastq', '.fq.gz' or '.fastq.gz'"
+            },
+            "fastq_2": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "pattern": "^\\S+\\.f(ast)?q(\\.gz)?$",
+                "errorMessage": "FASTQ file for reads 2 cannot contain spaces and must have extension '.fq', '.fastq', '.fq.gz' or '.fastq.gz'"
+            },
+            "sdbg": {
+                "type": "string",
+                "format": "directory-path",
+                "exists": true,
+                "pattern": "^\\S+$",
+                "errorMessage": "Path to a pre-built MCAAT succinct de Bruijn graph directory (must contain graph.sdbg_info and graph.sdbg.*). Cannot contain spaces."
+            }
+        },
+        "required": ["sample"],
+        "anyOf": [{ "required": ["fastq_1"] }, { "required": ["sdbg"] }],
+        "dependentRequired": {
+            "fastq_2": ["fastq_1"]
+        },
+        "not": {
+            "required": ["sdbg", "fastq_1"]
+        },
+        "errorMessage": {
+            "required": {
+                "sample": "The 'sample' column is mandatory on every row."
+            },
+            "anyOf": "Every row must supply either 'fastq_1' (read-based analysis) or 'sdbg' (graph re-entry).",
+            "dependentRequired": {
+                "fastq_2": "'fastq_2' was given without 'fastq_1'. Reverse reads cannot be supplied on their own."
+            },
+            "not": "'sdbg' and 'fastq_1' are mutually exclusive: a graph re-entry row re-analyses an existing graph and must not also supply reads."
+        }
+    }
+}

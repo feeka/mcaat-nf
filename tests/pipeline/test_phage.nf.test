@@ -1,0 +1,259 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Pipeline-level test: the optional protospacer / phage-curation stage.
+
+    This file is the contract for conf/test_phage.config, which it loads
+    directly via the `config` directive so that a bare
+        nf-test test tests/pipeline/test_phage.nf.test
+    exercises the profile rather than silently falling back to the arrays-only
+    `test` profile configured in nf-test.config. CI additionally launches it as
+    `--profile "+test_phage,docker"` (see .github/workflows/nf-test.yml), which
+    applies the same file through the profile mechanism; the two agree by
+    construction because there is only one copy of the settings.
+
+    WHY THIS EXISTS. The phage stage is the one optional stage the pipeline
+    deliberately keeps (params.run_phage_curation = false by default), and
+    without this file nothing in the repository executes it -- MCAAT_PHAGECURATE,
+    the `save_phage_log` toggle and the phage publishDir blocks would all be
+    untested code that CI reports green on.
+
+    WHAT IT PROVES, beyond "it runs":
+
+      * the `rm -f phage/ContiguousPaths.fasta` guard -- MCAAT opens that file
+        with std::ios::app and never truncates it, so a retry into a reused
+        directory silently DOUBLES every record;
+      * the in-task awk header rewrite, in particular its `sub()` -- MCAAT emits
+        `>phage_excerpt_<spacer nucleotides>`
+        (src/protospacer_detection/phage_curator.cpp:570), and if the
+        'phage_excerpt_' prefix survives into `spacer=` then every join against
+        <sample>.spacers.fasta matches ZERO records, silently, because a
+        14-character prefix still looks like a plausible identifier. The
+        assertion below joins the two files for real;
+      * that a sample with no mappable arrays is a legitimate negative: MCAAT
+        prints "nothing to do", exits 0 and writes no FASTA, which is why the
+        module declares `fasta` optional;
+      * that graph RETENTION (--mcaat_keep_graph, required by this stage) is not
+        graph PUBLICATION (--save_mcaat_graph, still false here).
+
+    TEST DATA: -profile test_phage resolves params.pipelines_testdata_base_path
+    against https://github.com/RNABioInfo/mcaat-nf-testdata (branch `main`).
+    THAT REPOSITORY DOES NOT EXIST YET, so this test cannot pass until it is
+    created and populated. The samplesheet is the same one -profile test uses,
+    so the sample roster is gut_A (paired, two lanes), soil_B (single) and
+    empty_C (zero arrays by construction).
+
+    SNAPSHOT POLICY: the same rules as tests/pipeline/test_default.nf.test.
+    Nothing here is content-snapshotted -- phage_curate.log.gz carries wall-clock
+    timings on every phase line and the contig order follows the SDBG walk, which
+    follows cycles.txt. Both are listed in tests/.nftignore.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+nextflow_pipeline {
+
+    name "mcaat-nf -profile test,test_phage"
+    script "../../main.nf"
+    config "../../conf/test_phage.config"
+
+    tag "pipeline"
+    tag "pipeline_phage"
+    tag "optional_stage"
+
+    test("-profile test_phage -- protospacer / phage curation") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+
+            // Header lines of the curated contigs, and the per-sample spacer
+            // sequences they claim to have been reconstructed from. The join
+            // between the two is the only thing that can detect a lost `sub()`.
+            def contigs = path("$outputDir/phage/gut_A/gut_A.phage_contigs.fasta").readLines()
+            def headers = contigs.findAll { line -> line.startsWith('>') }
+            def seqs    = contigs.findAll { line -> !line.startsWith('>') }
+
+            def spacer_fa = path("$outputDir/arrays/gut_A/gut_A.spacers.fasta").readLines()
+            def spacers   = spacer_fa.findAll { line -> !line.startsWith('>') }.toSet()
+
+            // `mcaat phage-curate` writes its phase banner to stdout, which the
+            // module redirects into phage_curate.log before gzipping it
+            // (src/main.cpp:310,322,342). These three strings are how CI tells
+            // "reached the beam search" apart from "exited during graph load".
+            def log_gut_A   = path("$outputDir/phage/gut_A/phage_curate.log.gz").linesGzip
+            def log_empty_C = path("$outputDir/phage/empty_C/phage_curate.log.gz").linesGzip
+
+            assertAll(
+                { assert workflow.success },
+
+                // MCAAT_PHAGECURATE degrades to errorStrategy 'ignore' after two
+                // attempts so that one pathological sample cannot fail a cohort
+                // run. That makes `workflow.success` blind to a failed phage
+                // task, so the trace has to be asserted separately.
+                { assert workflow.trace.failed().size() == 0 },
+
+                // ---- the log is published for every sample -----------------
+                // Three samples in, three logs out: this is the count assertion
+                // that catches a phage task silently dropped by 'ignore'.
+                {
+                    def phage_dir = new File("$outputDir/phage".toString())
+                    assert (phage_dir.listFiles() ?: new File[0])
+                        .findAll { d -> d.isDirectory() }
+                        .collect { d -> d.name }
+                        .sort() == ['empty_C', 'gut_A', 'soil_B']
+                },
+                // save_phage_log = true in conf/test_phage.config; with it false
+                // the stage would be a black box on a real failure.
+                { assert path("$outputDir/phage/gut_A/phage_curate.log.gz").exists() },
+                { assert path("$outputDir/phage/soil_B/phage_curate.log.gz").exists() },
+                { assert path("$outputDir/phage/empty_C/phage_curate.log.gz").exists() },
+
+                // ---- the run reached path reconstruction, not just graph load
+                { assert log_gut_A.any { line -> line.contains('[1/3] Loading graph') } },
+                { assert log_gut_A.any { line -> line.contains('[2/3] Mapping arrays to graph') } },
+                { assert log_gut_A.any { line -> line.contains('[3/3] Isolating protospacers') } },
+
+                // ---- empty_C is the negative control -----------------------
+                // A header-only CRISPR_Arrays_1.txt maps no arrays, so
+                // phage-curate prints "nothing to do", returns 0 and writes no
+                // FASTA at all. That is why MCAAT_PHAGECURATE declares its
+                // `fasta` output optional; a missing file here must not be an
+                // error, and a PRESENT file here means array filtering changed.
+                { assert log_empty_C.any { line -> line.contains('nothing to do') } },
+                { assert !path("$outputDir/phage/empty_C/empty_C.phage_contigs.fasta").exists() },
+
+                // ---- ContiguousPaths.fasta is an intermediate ---------------
+                // It is written into the task-local phage/ directory, rewritten
+                // by awk, and must never be published: it is the file MCAAT
+                // opens with std::ios::app and never truncates, so publishing it
+                // would ship a doubled record set after any retry.
+                { assert !path("$outputDir/phage/gut_A/ContiguousPaths.fasta").exists() },
+                { assert !path("$outputDir/phage/soil_B/ContiguousPaths.fasta").exists() },
+
+                // ---- the rewritten header contract -------------------------
+                //   >{sample}|phage{n} spacer={seq} len={bp}
+                { assert headers.size() > 0 },
+                { assert headers.size() == seqs.size() },
+                {
+                    assert headers.every { h ->
+                        h ==~ /^>gut_A\|phage\d+ spacer=[ACGTNacgtn]+ len=\d+$/
+                    }
+                },
+                {
+                    // The `sub(/^phage_excerpt_/, "", sp)` in the module is
+                    // load-bearing. If it is dropped, the regex above still
+                    // passes -- 'phage_excerpt_' is not nucleotides, so it would
+                    // actually fail there too -- but assert it by name as well,
+                    // because a future MCAAT could change the prefix rather than
+                    // remove it.
+                    assert headers.every { h -> !h.contains('phage_excerpt_') }
+                },
+                {
+                    // `len=` must equal the length of the record it labels; the
+                    // awk computes it from the sequence line itself.
+                    def pairs = [headers, seqs].transpose()
+                    assert pairs.every { pair ->
+                        def declared = (pair[0] =~ /len=(\d+)$/)[0][1] as int
+                        declared == pair[1].length()
+                    }
+                },
+                {
+                    // Upper bound is hard-coded upstream: main.cpp passes
+                    // max_total_bp = 2500 to FindContiguousPathsFromGroupedPaths.
+                    assert seqs.every { s -> s.length() <= 2500 }
+                },
+                {
+                    // THE join. Every `spacer=` value must be a spacer this
+                    // sample actually reported, byte for byte. This is what a
+                    // lost sub() breaks, and it breaks silently everywhere else.
+                    def claimed = headers.collect { h -> (h =~ /spacer=(\S+) /)[0][1] }
+                    assert claimed.size() == headers.size()
+                    assert claimed.every { s -> spacers.contains(s) }
+                },
+
+                // ---- the array stage is unaffected -------------------------
+                // The MCAAT_RUN script text is invariant to this toggle, so the
+                // arrays-only deliverables must be identical to -profile test.
+                { assert path("$outputDir/arrays/gut_A/gut_A.arrays.tsv").exists() },
+                { assert path("$outputDir/arrays/gut_A/gut_A.spacers.fasta").exists() },
+                { assert path("$outputDir/reports/cohort_summary.tsv").exists() },
+                { assert path("$outputDir/reports/cohort_spacers.unique.fasta").exists() },
+                { assert path("$outputDir/multiqc/multiqc_report.html").exists() },
+
+                // ---- retention is not publication --------------------------
+                // conf/test_phage.config sets mcaat_keep_graph = true because the
+                // stage consumes the SDBG, and leaves save_mcaat_graph at its
+                // default false. The graph must therefore be present in the work
+                // directory and absent from the published tree.
+                { assert !path("$outputDir/arrays/gut_A/graph").exists() },
+            )
+        }
+    }
+
+    test("-profile test_phage -- stub run") {
+
+        // The default-profile stub run never reaches MCAAT_PHAGECURATE, so this
+        // is the only place its `stub:` block is executed. It is load-bearing:
+        // `nf-core pipelines download` performs an offline stub run and fails
+        // the release CI if any reachable process lacks one.
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 0 },
+                { assert path("$outputDir/phage/gut_A/gut_A.phage_contigs.fasta").exists() },
+                { assert path("$outputDir/phage/gut_A/phage_curate.log.gz").exists() },
+                {
+                    // The stub emits one record in the real header format, so a
+                    // divergence between the stub and the script blocks shows up
+                    // here rather than at release time.
+                    assert path("$outputDir/phage/gut_A/gut_A.phage_contigs.fasta")
+                        .readLines()
+                        .findAll { line -> line.startsWith('>') }
+                        .every { h -> h ==~ /^>gut_A\|phage\d+ spacer=[ACGTNacgtn]+ len=\d+$/ }
+                },
+            )
+        }
+    }
+
+    test("-profile test_phage -- the stage is refused without a retained graph") {
+
+        // validateInputParameters() in subworkflows/local/utils_nfcore_mcaat_pipeline
+        // rejects this combination at LAUNCH TIME, before a single read is
+        // staged. Without that guard the run would build the graph, delete it,
+        // and only then discover that the stage it was launched for cannot run --
+        // hours in, at full cost.
+        when {
+            params {
+                outdir           = "$outputDir"
+                mcaat_keep_graph = false
+            }
+        }
+
+        then {
+            // The message is emitted by Nextflow's `error()`, which lands in the
+            // error report rather than on stdout; collect both so the assertion
+            // does not depend on which stream the runner captured.
+            def report = ([workflow.errorReport ?: '', workflow.errorMessage ?: ''] + (workflow.stdout ?: []))
+                .join('\n')
+
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains('--run_phage_curation requires --mcaat_keep_graph true') },
+                // Launch-time means launch-time: nothing may have been executed.
+                { assert workflow.trace.succeeded().size() == 0 },
+                { assert workflow.trace.failed().size() == 0 },
+            )
+        }
+    }
+}

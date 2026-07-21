@@ -1,0 +1,18 @@
+# Prettier configuration for RNABioInfo/mcaat-nf.
+#
+# Matches the nf-core/tools 4.0.2 template so that `nf-core pipelines lint`
+# and the `prek` / pre-commit prettier hook agree with each other. Deviating
+# from these two values is the single most common cause of an otherwise-green
+# PR failing the linting workflow.
+printWidth: 120
+overrides:
+  - files: "*.{md,yml,yaml,html,css,scss,js,cff}"
+    options:
+      tabWidth: 2
+  # nf-test snapshots are generated, ordered and md5-keyed by nf-test itself.
+  # Reformatting them changes nothing semantically but produces enormous,
+  # unreviewable diffs on every snapshot refresh.
+  - files: "*.snap"
+    options:
+      parser: json
+      printWidth: 200

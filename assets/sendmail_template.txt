@@ -1,0 +1,32 @@
+To: ${email}
+Subject: ${subject}
+Mime-Version: 1.0
+Content-Type: multipart/related;boundary="mcaatmimeboundary"
+
+--mcaatmimeboundary
+Content-Type: text/html; charset=utf-8
+
+${email_html}
+
+<%
+// mqcMaxSize comes from params.max_multiqc_email_size, which this pipeline does
+// not declare -- completionEmail() then passes 0. Zero is treated as "unset"
+// rather than "attach nothing ever", so fall back to a conservative built-in
+// ceiling. MultiQC reports for a large cohort routinely exceed what a mail
+// transfer agent will accept, and an oversized attachment is silently dropped
+// by the MTA, so the limit itself is not optional.
+def attachLimit = (mqcMaxSize && mqcMaxSize > 0) ? mqcMaxSize : 25 * 1024 * 1024
+if (mqcFile != null && mqcFile.exists() && mqcFile.size() > 0 && mqcFile.size() <= attachLimit) {
+%>
+--mcaatmimeboundary
+Content-Type: text/html; name="multiqc_report"
+Content-Transfer-Encoding: base64
+Content-ID: <mqcreport>
+Content-Disposition: attachment; filename="${mqcFile.fileName}"
+
+${mqcFile.bytes.encodeBase64().toString()}
+<%
+}
+%>
+
+--mcaatmimeboundary--

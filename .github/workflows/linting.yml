@@ -1,0 +1,234 @@
+name: linting
+
+# Static checks for RNABioInfo/mcaat-nf.
+#
+#   pre-commit      -- prettier + editorconfig-checker + ruff, via `prek`
+#                      (the Rust pre-commit runner; same .pre-commit-config.yaml
+#                      format, an order of magnitude faster to bootstrap).
+#                      The hook set lives in `.pre-commit-config.yaml` at the
+#                      repository root -- WITHOUT that file `prek run` exits
+#                      non-zero with "No .pre-commit-config.yaml file was found"
+#                      on every single push, so the file is load-bearing CI
+#                      infrastructure, not a developer convenience.
+#   nextflow-lint   -- `nextflow lint`, which is what actually enforces the
+#                      strict (v2) syntax this pipeline is written against:
+#                      no import, no classes in .nf, no for/while/switch, no
+#                      spread operator, def-declared locals, lowercase
+#                      channel.*, script: not shell:, quoted env 'FOO'.
+#   nf-core-lint    -- the pipeline-structure ruleset, pinned to the same
+#                      nf-core/tools version as .nf-core.yml. An unpinned run
+#                      turns every upstream tools release into a surprise
+#                      red CI on an unchanged repo.
+#
+#                      This pipeline is built with the nf-core template but is
+#                      NOT an nf-core pipeline, so it deliberately does not ship
+#                      a large part of the template file set (the community
+#                      governance documents, the nf-core branding assets, the
+#                      AWS and Dockstore integrations). `files_exist` is a HARD
+#                      failure, so EVERY such path is waived in `.nf-core.yml`
+#                      under `lint.files_exist` -- and, because that rule also
+#                      treats an absent file as a mismatch, under
+#                      `lint.files_unchanged` -- each with a one-line reason.
+#                      If you delete a template file, waive it there in the same
+#                      commit; a permanently red required-adjacent check trains
+#                      reviewers to ignore linting output, which is exactly what
+#                      the `pre-commit` job below refuses to allow for
+#                      .pre-commit-config.yaml.
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NF_CORE_TOOLS_VERSION: "4.0.2"
+  NXF_VER: "25.10.4"
+
+jobs:
+  pre-commit:
+    name: pre-commit (prettier, editorconfig, ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        # prettier is a node tool; pinning the runtime keeps formatting stable
+        # across runner image updates.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install prek
+        run: pip install prek
+
+      - name: Check the hook configuration exists
+        # prek (like pre-commit) exits non-zero with
+        #   "No .pre-commit-config.yaml file was found"
+        # when the config is absent. Say so explicitly rather than letting the
+        # generic formatting advice below misdiagnose it.
+        run: |
+          if [ ! -f .pre-commit-config.yaml ]; then
+            echo "::error file=.pre-commit-config.yaml::.pre-commit-config.yaml is missing; prek has no hooks to run."
+            exit 1
+          fi
+
+      - name: Run prek
+        run: prek run --all-files --show-diff-on-failure
+
+      - name: How to fix this
+        if: failure()
+        run: |
+          echo "::error::pre-commit hooks failed."
+          echo "Reproduce and fix locally with:"
+          echo "    pip install prek && prek run --all-files"
+          echo "Individual hooks:"
+          echo "    npx prettier@3.6.2 --write .        # markdown / yaml / json layout"
+          echo "    ruff check --fix bin/               # Python under bin/"
+          echo "    editorconfig-checker                # whitespace / final newline / charset"
+
+  nextflow-lint:
+    name: nextflow lint (strict syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "${{ env.NXF_VER }}"
+
+      - name: Lint Nextflow sources
+        # -format=false: report only, never rewrite in CI.
+        run: nextflow lint -format=false .
+
+  nf-core-lint:
+    name: nf-core pipelines lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "${{ env.NXF_VER }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install nf-core tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install nf-core==${NF_CORE_TOOLS_VERSION}
+
+      - name: Run nf-core pipelines lint
+        if: ${{ github.base_ref != 'main' }}
+        env:
+          GITHUB_COMMENTS_URL: ${{ github.event.pull_request.comments_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PR_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: nf-core -l lint_log.txt pipelines lint --dir "${GITHUB_WORKSPACE}" --markdown lint_results.md
+
+      - name: Run nf-core pipelines lint --release
+        if: ${{ github.base_ref == 'main' }}
+        env:
+          GITHUB_COMMENTS_URL: ${{ github.event.pull_request.comments_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_PR_COMMIT: ${{ github.event.pull_request.head.sha }}
+        run: nf-core -l lint_log.txt pipelines lint --release --dir "${GITHUB_WORKSPACE}" --markdown lint_results.md
+
+      # The template also writes a PR_number.txt here and uploads it with the
+      # log, so that a second workflow (linting_comment.yml) can download the
+      # artifact from the privileged `workflow_run` context and post the markdown
+      # back onto the pull request. That workflow is NOT shipped by this
+      # repository -- it is waived in .nf-core.yml -- so PR_number.txt would have
+      # no consumer. The log and the markdown are still uploaded, because they
+      # are what a maintainer downloads to read a failure.
+      - name: Upload linting log file artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: linting-logs
+          path: |
+            lint_log.txt
+            lint_results.md
+          if-no-files-found: ignore
+
+  schema-lint:
+    name: nextflow_schema.json sanity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate JSON assets parse at all
+        # A malformed nextflow_schema.json or schema_input.json fails the
+        # pipeline at launch with a stack trace rather than a useful message,
+        # so catch it here before anything expensive runs.
+        run: |
+          python - <<'PY'
+          import json, sys, pathlib
+          bad = []
+          for p in ["nextflow_schema.json", "assets/schema_input.json"]:
+              f = pathlib.Path(p)
+              if not f.exists():
+                  bad.append(f"{p}: missing")
+                  continue
+              try:
+                  json.loads(f.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  bad.append(f"{p}: {exc}")
+          for b in bad:
+              print(f"::error::{b}")
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: Check the Python helpers compile and are executable
+        run: |
+          python -m compileall -q bin/
+          fail=0
+          for f in bin/*.py; do
+            head -n 1 "$f" | grep -q '^#!' || { echo "::error::$f has no shebang"; fail=1; }
+            [ -x "$f" ] || echo "::warning::$f is not marked executable (git update-index --chmod=+x $f)"
+          done
+          exit $fail

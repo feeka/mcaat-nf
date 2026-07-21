@@ -1,0 +1,537 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/RNABioInfo/mcaat-nf/main/nextflow_schema.json",
+    "title": "RNABioInfo/mcaat-nf pipeline parameters",
+    "description": "CRISPR array and protospacer discovery directly in unassembled metagenomic reads, powered by MCAAT.",
+    "type": "object",
+    "$defs": {
+        "input_output_options": {
+            "title": "Input/output options",
+            "type": "object",
+            "fa_icon": "fas fa-terminal",
+            "description": "Define where the pipeline should find input data and save output data.",
+            "required": [
+                "input",
+                "outdir"
+            ],
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "schema": "assets/schema_input.json",
+                    "mimetype": "text/csv",
+                    "pattern": "^\\S+\\.csv$",
+                    "description": "Path to comma-separated file containing information about the samples in the experiment.",
+                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with a header row. Columns are `sample`, `run`, `fastq_1`, `fastq_2` and `sdbg`. Rows sharing a `sample` value are merged with `cat` before MCAAT runs.",
+                    "fa_icon": "fas fa-file-csv"
+                },
+                "outdir": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
+                    "fa_icon": "fas fa-folder-open"
+                },
+                "email": {
+                    "type": "string",
+                    "description": "Email address for completion summary.",
+                    "fa_icon": "fas fa-envelope",
+                    "help_text": "Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits. If set in your user config file (`~/.nextflow/config`) then you don't need to specify this on the command line for every run.",
+                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
+                },
+                "multiqc_title": {
+                    "type": "string",
+                    "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
+                    "fa_icon": "fas fa-file-signature"
+                }
+            }
+        },
+        "read_qc_options": {
+            "title": "Read QC options",
+            "type": "object",
+            "fa_icon": "fas fa-broom",
+            "description": "Quality control, contaminant removal and read-budget control applied before MCAAT.",
+            "help_text": "Every step in this group is ON by default, hence the `skip_*` naming. The read-QC chain is not cosmetic: MCAAT treats two input files as a strictly synchronised paired-end library and the vendored megahit aborts on an odd combined read count with a completely empty stderr, so strict paired trimming plus the pair-sync gate is the pipeline's main defence against an undebuggable failure.",
+            "properties": {
+                "skip_qc": {
+                    "type": "boolean",
+                    "description": "Bypass the entire read-QC subworkflow and feed raw samplesheet reads straight to MCAAT.",
+                    "help_text": "UNSAFE for two-file (paired-end) input: the R1/R2 record-count gate does not run, so a de-synchronised pair reaches MCAAT and megahit aborts with an empty error log. See docs/usage.md.",
+                    "fa_icon": "fas fa-forward"
+                },
+                "skip_fastqc": {
+                    "type": "boolean",
+                    "description": "Skip both FastQC instances (raw and trimmed).",
+                    "fa_icon": "fas fa-forward"
+                },
+                "skip_fastp": {
+                    "type": "boolean",
+                    "description": "Skip adapter and quality trimming with fastp.",
+                    "fa_icon": "fas fa-forward"
+                },
+                "fastp_save_trimmed_fail": {
+                    "type": "boolean",
+                    "description": "Write reads that fail the fastp filters to a separate file.",
+                    "help_text": "These reads are never fed to MCAAT: routing them back in would break the strict R1/R2 pairing that MCAAT's paired-end inference depends on.",
+                    "fa_icon": "fas fa-save"
+                },
+                "save_trimmed_reads": {
+                    "type": "boolean",
+                    "description": "Publish the trimmed FASTQ files.",
+                    "fa_icon": "fas fa-save"
+                },
+                "host_fasta": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "description": "Host genome FASTA for host-read depletion. Supplying it enables the depletion step.",
+                    "help_text": "Accepts a local path or an `https://` URL. A Bowtie2 index is built once per run and reused for every sample.",
+                    "fa_icon": "fas fa-dna"
+                },
+                "host_bowtie2_index": {
+                    "type": "string",
+                    "format": "directory-path",
+                    "exists": true,
+                    "description": "Directory containing a pre-built Bowtie2 index for the host genome.",
+                    "help_text": "Takes precedence over `--host_fasta` and skips the BOWTIE2_BUILD step.",
+                    "fa_icon": "fas fa-folder"
+                },
+                "save_hostremoved_reads": {
+                    "type": "boolean",
+                    "description": "Publish the host-depleted FASTQ files.",
+                    "fa_icon": "fas fa-save"
+                },
+                "remove_phix": {
+                    "type": "boolean",
+                    "description": "Enable a BBDuk k-mer scrub against the phiX reference.",
+                    "fa_icon": "fas fa-filter"
+                },
+                "phix_reference": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "default": "${projectDir}/assets/phix174.fasta.gz",
+                    "description": "Small contaminant FASTA used by BBDuk when `--remove_phix` is set.",
+                    "help_text": "Shipped with the pipeline as `assets/phix174.fasta.gz` (NCBI NC_001422.1, 5386 bp, public domain). Must stay small. Never point this at a mammalian genome: BBDuk builds an in-memory k-mer table over the whole reference and will not fit.",
+                    "fa_icon": "fas fa-file"
+                },
+                "subsample_reads": {
+                    "type": [
+                        "integer",
+                        "number"
+                    ],
+                    "description": "Read budget cap passed to `seqtk sample`. An integer means N reads per mate; a float between 0 and 1 means a fraction.",
+                    "help_text": "This is the pipeline's ONLY lever on MCAAT's resource envelope. MCAAT builds its SDBG with a hard-coded minimum k-mer count of 1, so every sequencing error k-mer is retained and graph size, RAM and disk all scale with total sequenced bases rather than with community complexity. `--ram` is functionally inert inside MCAAT and cannot be used to cap anything.",
+                    "minimum": 0,
+                    "fa_icon": "fas fa-cut"
+                },
+                "subsample_seed": {
+                    "type": "integer",
+                    "default": 100,
+                    "description": "Seed passed to `seqtk sample` (`-s`).",
+                    "help_text": "Applied identically to both mates, which is what preserves R1/R2 pairing through subsampling.",
+                    "minimum": 1,
+                    "fa_icon": "fas fa-seedling"
+                },
+                "skip_pairsync_check": {
+                    "type": "boolean",
+                    "description": "Disable the pre-dispatch R1/R2 record-count assertion.",
+                    "help_text": "Do not set this. The gate is the pipeline's single highest-value defensive construct: without it a de-synchronised pair reaches MCAAT, megahit calls xfatal, and the task fails with exit 1 and an empty .command.err because megahit's stderr is redirected to /dev/null inside MCAAT.",
+                    "fa_icon": "fas fa-exclamation-triangle",
+                    "hidden": true
+                }
+            }
+        },
+        "mcaat_options": {
+            "title": "MCAAT options",
+            "type": "object",
+            "fa_icon": "fas fa-project-diagram",
+            "description": "Tunables for the MCAAT succinct de Bruijn graph build and CRISPR array detection.",
+            "help_text": "Only genuinely live MCAAT flags are exposed here. The k-mer size (23) and the minimum k-mer frequency (1) are hard-coded in the graph build; `--ram`, `--threads`, `--autoclean`, `--output-folder`, `--settings` and `--benchmark` are derived, hard-wired or inert and are deliberately not exposed. See docs/usage.md for the full list and the reasoning.",
+            "properties": {
+                "mcaat_min_spacer_len": {
+                    "type": "integer",
+                    "default": 23,
+                    "minimum": 1,
+                    "description": "Minimum spacer length (`--min-spacer-len`). Post-processing filter.",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "mcaat_max_spacer_len": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "description": "Maximum spacer length (`--max-spacer-len`). Post-processing filter.",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "mcaat_min_repeat_len": {
+                    "type": "integer",
+                    "default": 23,
+                    "minimum": 23,
+                    "description": "Minimum repeat length (`--min-repeat-len`). Post-processing filter.",
+                    "help_text": "The schema minimum is 23 because the de Bruijn graph k is hard-coded to 23: a repeat shorter than k cannot be represented, so lower values cannot help.",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "mcaat_max_repeat_len": {
+                    "type": "integer",
+                    "default": 55,
+                    "minimum": 23,
+                    "description": "Maximum repeat length (`--max-repeat-len`). Post-processing filter.",
+                    "fa_icon": "fas fa-ruler-horizontal"
+                },
+                "mcaat_cycle_min_length": {
+                    "type": "integer",
+                    "default": 27,
+                    "minimum": 1,
+                    "description": "Minimum multicycle length in graph nodes (`--cycle-min-length`).",
+                    "fa_icon": "fas fa-circle-notch"
+                },
+                "mcaat_cycle_max_length": {
+                    "type": "integer",
+                    "default": 77,
+                    "minimum": 1,
+                    "description": "Maximum multicycle length in graph nodes (`--cycle-max-length`).",
+                    "fa_icon": "fas fa-circle-notch"
+                },
+                "mcaat_threshold_multiplicity": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "description": "Multiplicity threshold a candidate cycle must reach to be reported (`--threshold-multiplicity`).",
+                    "fa_icon": "fas fa-layer-group"
+                },
+                "mcaat_low_abundance": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable MCAAT's low-abundance mode (`--low-abundance`).",
+                    "help_text": "Rendered on the command line as the literal lowercase string `true` or `false`. MCAAT accepts only `1`, `true` or `yes` and silently means FALSE for anything else, including `True`.",
+                    "fa_icon": "fas fa-signal"
+                },
+                "mcaat_keep_graph": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Retain the built SDBG in the task work directory after the run.",
+                    "help_text": "This is the single documented cache-busting toggle in the pipeline: changing it changes the resolved MCAAT_RUN script and therefore invalidates every cached array-detection task. Set it once per campaign and never mid-study. Required by `--run_phage_curation` and `--save_mcaat_graph`. For cohorts larger than ~100 samples where work-directory disk is the binding constraint, set it to `false` and accept that adding the optional stage later means rebuilding the graphs.",
+                    "fa_icon": "fas fa-hdd"
+                },
+                "prune_graph": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Delete the megahit build intermediates that MCAAT never reads back.",
+                    "help_text": "Removes `outfile_prefix.bin` (a full 2-bit re-encoding of every input read, ~0.29 bytes per base), `outfile_prefix.lib_info`, `data.lib` and `graph.mercy_cand.*`. Verified safe: MCAAT's graph loader opens only `<prefix>.sdbg_info` and the `<prefix>.sdbg.<N>` shards named inside it. Set to `false` to keep a fully megahit-compatible directory, roughly 3-4x larger.",
+                    "fa_icon": "fas fa-cut"
+                },
+                "save_mcaat_graph": {
+                    "type": "boolean",
+                    "description": "Publish the (pruned) SDBG to `<outdir>/arrays/<sample>/graph/`.",
+                    "help_text": "Requires `--mcaat_keep_graph`. Publishing uses `--graph_publish_mode` rather than `--publish_dir_mode` so that a graph re-entry archive does not silently copy tens of gigabytes per sample.",
+                    "fa_icon": "fas fa-save"
+                },
+                "graph_publish_mode": {
+                    "type": "string",
+                    "default": "symlink",
+                    "enum": [
+                        "symlink",
+                        "copy",
+                        "link",
+                        "rellink"
+                    ],
+                    "description": "publishDir mode used ONLY for the SDBG directory.",
+                    "help_text": "Use `copy` only if you intend to delete the Nextflow work directory and still re-enter the graph later via the samplesheet `sdbg` column.",
+                    "fa_icon": "fas fa-copy"
+                },
+                "save_mcaat_cycles": {
+                    "type": "boolean",
+                    "description": "Publish MCAAT's intermediate `cycles.txt`.",
+                    "help_text": "Can be enormous (one line per cycle, 23 bp per node) and its line order comes from an unordered_map iteration, so it is not byte-reproducible between runs.",
+                    "fa_icon": "fas fa-save"
+                },
+                "mcaat_scratch": {
+                    "type": "string",
+                    "description": "Value for the Nextflow `scratch` directive on all MCAAT processes, e.g. `$TMPDIR` or an absolute path.",
+                    "help_text": "MCAAT writes its `--output-folder` relative to the task working directory, so relocating the task CWD does relocate every intermediate onto node-local storage. Off by default because not all sites provision node-local scratch.",
+                    "fa_icon": "fas fa-hdd",
+                    "hidden": true
+                },
+                "mcaat_args": {
+                    "type": "string",
+                    "description": "Raw arguments appended to the `mcaat` command line before `--input-files`.",
+                    "help_text": "HAZARD: MCAAT's argument parser has no unknown-argument branch, so a typo here is silently ignored and the run proceeds with defaults. The pipeline's `parameters.json` readback in MCAAT_PARSEARRAYS is the only detector, and it can only check flags the pipeline itself sets.",
+                    "fa_icon": "fas fa-terminal",
+                    "hidden": true
+                },
+                "mcaat_container": {
+                    "type": "string",
+                    "default": "docker.io/feeka94/mcaat:1.0.1",
+                    "description": "Container image providing the `mcaat` binary.",
+                    "help_text": "Built from this repository's Dockerfile.local with -march=x86-64-v2 (verified free of AVX instructions), spoa_optimize_for_native=OFF, no ENTRYPOINT, and ENV MCAAT_VERSION set. The MCAAT authors' original docker.io/feeka94/mcaat:1.0.0 is built with -march=native and declares ENTRYPOINT [\"mcaat\"]; it still works here because the modules pass --entrypoint \"\" under Docker/Podman, but it may abort with SIGILL (exit 132) on a CPU older than its build host.",
+                    "fa_icon": "fas fa-docker"
+                }
+            }
+        },
+        "stage_activation": {
+            "title": "Stage activation",
+            "type": "object",
+            "fa_icon": "fas fa-toggle-on",
+            "description": "Switch on the optional, experimental post-detection stage.",
+            "help_text": "The phage-curation stage belongs to MCAAT's unreleased v2.0.0 track and is disabled by default. It consumes the SDBG built by the array-detection stage and therefore requires `--mcaat_keep_graph true`.",
+            "properties": {
+                "run_phage_curation": {
+                    "type": "boolean",
+                    "description": "Enable the optional protospacer / phage curation stage. EXPERIMENTAL.",
+                    "help_text": "Requires `--mcaat_keep_graph true`. The underlying search is an uncapped recursive DFS with no wall-clock budget, so a single pathological sample is allowed to fail without failing the cohort.",
+                    "fa_icon": "fas fa-virus"
+                }
+            }
+        },
+        "phage_curation_options": {
+            "title": "Phage curation options",
+            "type": "object",
+            "fa_icon": "fas fa-virus",
+            "description": "Options for the optional, experimental `mcaat phage-curate` stage.",
+            "help_text": "Intentionally near-empty. Every phage tunable in MCAAT is either hard-coded (search depth 50 then overridden per cycle, contig bounds 500-2500 bp) or accepted-and-never-read (`--beam-width`), so exposing them would be a lie to the user.",
+            "properties": {
+                "save_phage_log": {
+                    "type": "boolean",
+                    "description": "Publish the gzipped `phage-curate` stdout log.",
+                    "fa_icon": "fas fa-save"
+                }
+            }
+        },
+        "reporting_options": {
+            "title": "Reporting options",
+            "type": "object",
+            "fa_icon": "fas fa-chart-bar",
+            "description": "Cohort aggregation and report generation.",
+            "properties": {
+                "skip_cohort_aggregation": {
+                    "type": "boolean",
+                    "description": "Skip the cross-sample aggregation layer (CSVTK_CONCAT, SEQKIT_RMDUP, COHORT_SUMMARISE).",
+                    "fa_icon": "fas fa-forward"
+                },
+                "skip_multiqc": {
+                    "type": "boolean",
+                    "description": "Skip the MultiQC report.",
+                    "fa_icon": "fas fa-forward"
+                },
+                "cohort_min_spacer_sharing": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 0,
+                    "description": "Minimum number of shared spacers required for a sample pair to be emitted into the spacer-sharing matrix.",
+                    "help_text": "Rendered onto the `bin/mcaat_aggregate.py` command line by COHORT_SUMMARISE as `--min-spacer-sharing`. `0` is accepted and means \"emit every pair\", which on a large cohort produces an N^2 table.",
+                    "fa_icon": "fas fa-share-alt"
+                },
+                "cohort_min_spacer_redundancy": {
+                    "type": "integer",
+                    "default": 2,
+                    "minimum": 0,
+                    "description": "Minimum number of samples a spacer must occur in before it is emitted into the spacer-redundancy table.",
+                    "help_text": "Rendered onto the `bin/mcaat_aggregate.py` command line by COHORT_SUMMARISE as `--min-spacer-redundancy`. The default of 2 keeps the table to spacers that genuinely recur across the cohort; `1` emits every spacer in the study and is usually enormous.",
+                    "fa_icon": "fas fa-clone"
+                },
+                "multiqc_config": {
+                    "type": "string",
+                    "format": "file-path",
+                    "description": "Custom config file to supply to MultiQC. Merged with the pipeline's own config.",
+                    "fa_icon": "fas fa-cog",
+                    "hidden": true
+                },
+                "multiqc_logo": {
+                    "type": "string",
+                    "format": "file-path",
+                    "description": "Custom logo file to supply to MultiQC.",
+                    "fa_icon": "fas fa-image",
+                    "hidden": true
+                },
+                "multiqc_methods_description": {
+                    "type": "string",
+                    "format": "file-path",
+                    "description": "Custom MultiQC yaml file containing HTML including a methods description.",
+                    "fa_icon": "fas fa-cog",
+                    "hidden": true
+                }
+            }
+        },
+        "institutional_config_options": {
+            "title": "Institutional config options",
+            "type": "object",
+            "fa_icon": "fas fa-university",
+            "description": "Parameters used to describe centralised config profiles. These should not be edited.",
+            "help_text": "The centralised nf-core configuration profiles use a handful of pipeline parameters to describe themselves. This information is then printed to the Nextflow log when you run a pipeline. You should not need to change these values when you run a pipeline.",
+            "properties": {
+                "custom_config_version": {
+                    "type": "string",
+                    "description": "Git commit id for Institutional configs.",
+                    "default": "master",
+                    "hidden": true,
+                    "fa_icon": "fas fa-users-cog"
+                },
+                "custom_config_base": {
+                    "type": "string",
+                    "description": "Base directory for Institutional configs.",
+                    "default": "https://raw.githubusercontent.com/nf-core/configs/master",
+                    "hidden": true,
+                    "help_text": "If you're running offline, Nextflow will not be able to fetch the institutional config files from the internet. If you don't need them, then this is not a problem. If you do need them, you should download the files from the repo and tell Nextflow where to find them with this parameter.",
+                    "fa_icon": "fas fa-users-cog"
+                },
+                "config_profile_name": {
+                    "type": "string",
+                    "description": "Institutional config name.",
+                    "hidden": true,
+                    "fa_icon": "fas fa-users-cog"
+                },
+                "config_profile_description": {
+                    "type": "string",
+                    "description": "Institutional config description.",
+                    "hidden": true,
+                    "fa_icon": "fas fa-users-cog"
+                },
+                "config_profile_contact": {
+                    "type": "string",
+                    "description": "Institutional config contact information.",
+                    "hidden": true,
+                    "fa_icon": "fas fa-users-cog"
+                },
+                "config_profile_url": {
+                    "type": "string",
+                    "description": "Institutional config URL link.",
+                    "hidden": true,
+                    "fa_icon": "fas fa-users-cog"
+                }
+            }
+        },
+        "generic_options": {
+            "title": "Generic options",
+            "type": "object",
+            "fa_icon": "fas fa-file-import",
+            "description": "Less common options for the pipeline, typically set in a config file.",
+            "help_text": "These options are common to all nf-core pipelines and allow you to customise some of the core preferences for how the pipeline runs.",
+            "properties": {
+                "help": {
+                    "type": [
+                        "boolean",
+                        "string"
+                    ],
+                    "description": "Display help text.",
+                    "fa_icon": "fas fa-question-circle",
+                    "hidden": true
+                },
+                "help_full": {
+                    "type": "boolean",
+                    "description": "Display help text for all parameters, including hidden ones.",
+                    "fa_icon": "fas fa-question-circle",
+                    "hidden": true
+                },
+                "show_hidden": {
+                    "type": "boolean",
+                    "description": "Show all params when using `--help`.",
+                    "fa_icon": "fas fa-eye-slash",
+                    "hidden": true
+                },
+                "version": {
+                    "type": "boolean",
+                    "description": "Display version and exit.",
+                    "fa_icon": "fas fa-question-circle",
+                    "hidden": true
+                },
+                "validate_params": {
+                    "type": "boolean",
+                    "description": "Boolean whether to validate parameters against the schema at runtime.",
+                    "default": true,
+                    "fa_icon": "fas fa-check-square",
+                    "hidden": true
+                },
+                "monochrome_logs": {
+                    "type": "boolean",
+                    "description": "Do not use coloured log outputs.",
+                    "fa_icon": "fas fa-palette",
+                    "hidden": true
+                },
+                "publish_dir_mode": {
+                    "type": "string",
+                    "default": "copy",
+                    "description": "Method used to save pipeline results to output directory.",
+                    "help_text": "The Nextflow `publishDir` option specifies which intermediate files should be saved to the output directory. This option tells the pipeline what method should be used to move these files. See [Nextflow docs](https://www.nextflow.io/docs/latest/process.html#publishdir) for details. Note that the SDBG directory is published with `--graph_publish_mode` instead, so that turning on `--save_mcaat_graph` does not copy tens of gigabytes per sample.",
+                    "fa_icon": "fas fa-copy",
+                    "enum": [
+                        "symlink",
+                        "rellink",
+                        "link",
+                        "copy",
+                        "copyNoFollow",
+                        "move"
+                    ],
+                    "hidden": true
+                },
+                "email_on_fail": {
+                    "type": "string",
+                    "description": "Email address for completion summary, only when pipeline fails.",
+                    "fa_icon": "fas fa-exclamation-triangle",
+                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
+                    "help_text": "An email address to send a summary email to when the pipeline is completed - ONLY sent if the pipeline does not exit successfully.",
+                    "hidden": true
+                },
+                "plaintext_email": {
+                    "type": "boolean",
+                    "description": "Send plain-text email instead of HTML.",
+                    "fa_icon": "fas fa-remove-format",
+                    "hidden": true
+                },
+                "hook_url": {
+                    "type": "string",
+                    "description": "Incoming hook URL for messaging service.",
+                    "fa_icon": "fas fa-people-group",
+                    "help_text": "Incoming hook URL for messaging service. Currently, MS Teams and Slack are supported.",
+                    "hidden": true
+                },
+                "trace_report_suffix": {
+                    "type": "string",
+                    "fa_icon": "far calendar",
+                    "description": "Suffix to add to the trace report filename. Default is the date and time in the format yyyy-MM-dd_HH-mm-ss.",
+                    "hidden": true
+                },
+                "pipelines_testdata_base_path": {
+                    "type": "string",
+                    "fa_icon": "far fa-check-circle",
+                    "description": "Base URL or local path to location of pipeline test dataset files",
+                    "help_text": "The default points at RNABioInfo/mcaat-nf-testdata, which DOES NOT EXIST YET. It has to be created and populated before any `-profile test*` run can succeed. Until then, point this at a local checkout of the test data.",
+                    "default": "https://raw.githubusercontent.com/RNABioInfo/mcaat-nf-testdata/main/",
+                    "hidden": true
+                },
+                "modules_testdata_base_path": {
+                    "type": "string",
+                    "fa_icon": "far fa-check-circle",
+                    "description": "Base URL or local path to location of modules test dataset files",
+                    "default": "s3://ngi-igenomes/testdata/nf-core/modules/",
+                    "hidden": true
+                }
+            }
+        }
+    },
+    "allOf": [
+        {
+            "$ref": "#/$defs/input_output_options"
+        },
+        {
+            "$ref": "#/$defs/read_qc_options"
+        },
+        {
+            "$ref": "#/$defs/mcaat_options"
+        },
+        {
+            "$ref": "#/$defs/stage_activation"
+        },
+        {
+            "$ref": "#/$defs/phage_curation_options"
+        },
+        {
+            "$ref": "#/$defs/reporting_options"
+        },
+        {
+            "$ref": "#/$defs/institutional_config_options"
+        },
+        {
+            "$ref": "#/$defs/generic_options"
+        }
+    ]
+}

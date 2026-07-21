@@ -1,0 +1,146 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: "cohort_summarise"
+description: |
+  Cohort aggregation for MCAAT CRISPR array calls.
+
+  Merges the per-sample tables emitted by `MCAAT_PARSEARRAYS` into the cross-sample
+  deliverables -- a merged arrays table, a per-sample summary, a pairwise spacer-sharing
+  table, a cross-sample spacer redundancy table, a repeat-family table and a
+  unique-spacer FASTA -- then renders them as MultiQC custom content.
+
+  Implementation notes:
+
+    * `cohort_arrays.tsv` is written by STREAMING the per-sample tables, so the
+      concatenation never holds the cohort in memory. Only the per-sample summaries and
+      the spacer/repeat indexes are retained.
+    * Pairwise sharing is derived from a spacer-to-samples index rather than by
+      intersecting every pair of sample sets: a spacer seen in k samples contributes one
+      to each of the k*(k-1)/2 pairs. Identical numbers, dramatically cheaper on the
+      sparse sharing seen in real cohorts.
+    * Every sample that reached this stage appears in `cohort_summary.tsv`, including
+      those where MCAAT legitimately found zero arrays. The roster is built from the
+      staged filenames, the provenance tables AND the data rows, so a sample that
+      contributes no data rows at all is still an explicit zero row.
+    * Both inputs are the PER-SAMPLE files, never a pre-concatenated cohort table: the
+      per-sample filenames are the only surviving evidence of a zero-array sample.
+    * Inputs are classified by FILENAME SUFFIX, not by input slot, so a mis-ordered call
+      site yields correct tables rather than silently-`NA` provenance columns.
+keywords:
+  - crispr
+  - metagenomics
+  - cohort
+  - spacer sharing
+  - aggregation
+tools:
+  - "mcaat_aggregate.py":
+      description: "Pipeline-owned cohort aggregator (Python standard library only)."
+      homepage: "https://github.com/RNABioInfo/mcaat-nf"
+      documentation: "https://github.com/RNABioInfo/mcaat-nf"
+      licence: ["MIT"]
+      identifier: ""
+  - "mcaat_multiqc_sections.py":
+      description: "Pipeline-owned MultiQC custom-content renderer (Python standard library only)."
+      homepage: "https://github.com/RNABioInfo/mcaat-nf"
+      documentation: "https://github.com/RNABioInfo/mcaat-nf"
+      licence: ["MIT"]
+      identifier: ""
+  - "python":
+      description: "Python programming language."
+      homepage: "https://www.python.org"
+      documentation: "https://docs.python.org"
+      licence: ["PSF-2.0"]
+      identifier: ""
+
+input:
+  - - arrays_tsv:
+        type: file
+        description: |
+          All per-sample `<sample>.arrays.tsv` files from
+          `MCAAT_PARSEARRAYS.out.tsv.collect()`. At least one is required. Pass the
+          per-sample files, not a pre-concatenated cohort table: a sample that
+          legitimately found zero arrays contributes no rows, so its filename is the
+          only evidence that it existed.
+        pattern: "*.arrays.tsv"
+  - - provenance_tsv:
+        type: file
+        description: |
+          All per-sample `<sample>.provenance.tsv` files from
+          `MCAAT_PARSEARRAYS.out.provenance.collect()`. Optional -- pass `[]`; the
+          provenance columns of `cohort_summary.tsv` then read `NA`. NEVER pass MCAAT's
+          raw `parameters.json` here: every sample emits a file with that exact name, so
+          more than one sample aborts at staging with an input file name collision, and
+          the file carries no sample identity in any case.
+        pattern: "*.provenance.tsv"
+
+output:
+  arrays:
+    - "cohort_arrays.tsv":
+        type: file
+        description: Every per-sample spacer row, concatenated under a single header.
+        pattern: "cohort_arrays.tsv"
+  summary:
+    - "cohort_summary.tsv":
+        type: file
+        description: |
+          One row per sample: array and spacer counts, unique-spacer and repeat-family
+          counts, length statistics, cross-sample sharing counts, and a provenance echo of
+          the MCAAT settings actually used.
+        pattern: "cohort_summary.tsv"
+  sharing:
+    - "cohort_spacer_sharing.tsv":
+        type: file
+        description: |
+          Long-format pairwise table with `sample_a` < `sample_b`: shared spacer count,
+          Jaccard index over unique spacer sets, and shared consensus-repeat count. Only
+          pairs meeting the `--min-spacer-sharing` threshold (from
+          `params.cohort_min_spacer_sharing`) are emitted.
+        pattern: "cohort_spacer_sharing.tsv"
+  redundancy:
+    - "cohort_spacer_redundancy.tsv":
+        type: file
+        description: |
+          Cross-sample spacer redundancy: one row per exact spacer sequence seen in at
+          least `--min-spacer-redundancy` samples (from
+          `params.cohort_min_spacer_redundancy`), with the sample list, total occurrence
+          count and the consensus repeats it was observed alongside.
+        pattern: "cohort_spacer_redundancy.tsv"
+  families:
+    - "cohort_repeat_families.tsv":
+        type: file
+        description: |
+          One row per distinct consensus repeat, ranked by cohort prevalence: the samples
+          it occurs in, the number of arrays and spacers it carries, and the median
+          spacer length within the family.
+        pattern: "cohort_repeat_families.tsv"
+  unique_spacers:
+    - "cohort_spacers.unique.fasta":
+        type: file
+        description: |
+          One record per distinct spacer sequence across the cohort, in deterministic
+          sorted order, with sample provenance in the description line. NOT PRODUCED ON A
+          DEFAULT RUN: the shipped `conf/modules.config` sets
+          `ext.args = '--no-unique-fasta'` on this process, because `SEQKIT_RMDUP`
+          publishes a file of the same name into the same `<outdir>/reports` directory
+          and only one process may own a publish path. `SEQKIT_RMDUP` is that owner.
+          Hence `optional: true`; nothing in the workflow consumes this output.
+        pattern: "cohort_spacers.unique.fasta"
+  mqc:
+    - "*_mqc.{tsv,yaml}":
+        type: file
+        description: |
+          MultiQC custom-content sections, discovered by the magic-filename mechanism:
+          `mcaat_cohort_summary` (YAML table), `mcaat_arrays_bargraph`,
+          `mcaat_spacerlen` and `mcaat_repeatlen` (length distributions) and
+          `mcaat_sharing` (a sample-by-sample spacer-sharing heatmap, omitted for
+          single-sample cohorts).
+        pattern: "*_mqc.{tsv,yaml}"
+  versions:
+    - versions:
+        type: file
+        description: Emitted on the `versions` topic channel, not as a `versions.yml` file.
+
+authors:
+  - "@feeka94"
+maintainers:
+  - "@feeka94"

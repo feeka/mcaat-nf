@@ -1,0 +1,114 @@
+{
+    "name": "RNABioInfo/mcaat-nf",
+    "homePage": "https://github.com/RNABioInfo/mcaat-nf",
+    "repos": {
+        "https://github.com/nf-core/modules.git": {
+            "modules": {
+                "nf-core": {
+                    "bbmap/bbduk": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "bowtie2/align": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "bowtie2/build": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "cat/fastq": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "csvtk/concat": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "fastp": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "fastqc": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "multiqc": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "seqkit/rmdup": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "seqkit/stats": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "seqtk/sample": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    }
+                }
+            },
+            "subworkflows": {
+                "nf-core": {
+                    "utils_nextflow_pipeline": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "subworkflows"
+                        ]
+                    },
+                    "utils_nfcore_pipeline": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "subworkflows"
+                        ]
+                    },
+                    "utils_nfschema_plugin": {
+                        "branch": "master",
+                        "git_sha": "e8c96d814d65d575a840063c90905e44ac5ecc12",
+                        "installed_by": [
+                            "subworkflows"
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}

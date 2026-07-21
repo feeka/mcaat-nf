@@ -1,0 +1,133 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: "mcaat_parsearrays"
+description: |
+  Parse MCAAT `CRISPR_Arrays_*.txt` into machine-readable per-sample tables, and assert
+  that the parameters MCAAT actually recorded in `parameters.json` match the ones the
+  pipeline intended.
+
+  MCAAT emits a human-readable, line-oriented report rather than a table. This module owns
+  the entire grammar; no workflow, config or other module may hard-code a column name or a
+  format assumption about the MCAAT array output.
+
+  Grammar handled (verified against `include/crispr_array/post_processing.h` and MCAAT's
+  own reference reader `include/core/array_to_nodes.h`):
+
+    * A five-line `#` preamble carrying a literal UTF-8 em-dash, and `# Arrays` /
+      `# Spacers` counts that are GLOBAL RUN TOTALS repeated verbatim in every split file.
+      They are used only as a cross-check and are never summed.
+    * `>Array_<N>  spacers=<count>` opens a block; the next non-indented line is the
+      consensus repeat; indented lines are `<repeat variant>\tab<spacer>`.
+    * A repeat variant written as a run of `-` is MCAAT's encoding for "identical to the
+      consensus repeat" and is expanded back to the real consensus sequence in the output.
+    * Split files are ordered NUMERICALLY on the `_<N>` suffix. MCAAT's own reader sorts
+      lexicographically, so `_10` would otherwise precede `_2`.
+
+  Zero arrays is a common, legitimate metagenomic result. A missing file, a header-only
+  file and a populated-but-fully-filtered file all normalise to zero data rows plus an
+  explicit zero row in the MultiQC general-statistics output -- never to an error.
+keywords:
+  - crispr
+  - metagenomics
+  - spacer
+  - repeat
+  - parsing
+tools:
+  - "mcaat_parse_arrays.py":
+      description: "Pipeline-owned MCAAT array report parser (Python standard library only)."
+      homepage: "https://github.com/RNABioInfo/mcaat-nf"
+      documentation: "https://github.com/RNABioInfo/mcaat-nf"
+      licence: ["MIT"]
+      identifier: ""
+  - "python":
+      description: "Python programming language."
+      homepage: "https://www.python.org"
+      documentation: "https://docs.python.org"
+      licence: ["PSF-2.0"]
+      identifier: ""
+
+input:
+  - - meta:
+        type: map
+        description: |
+          Groovy Map containing sample information, e.g. `[ id:'gut_A', single_end:false ]`.
+          `id` is the only key used in output filenames.
+    - arrays:
+        type: file
+        description: |
+          One or more `CRISPR_Arrays_*.txt` files from `MCAAT_RUN`. Staged into a dedicated
+          `arrays_in/` directory so that no other sample's array files can be picked up.
+        pattern: "*CRISPR_Arrays_*.txt"
+    - params_json:
+        type: file
+        description: |
+          MCAAT's `parameters.json`. Optional -- pass `[]` to skip both the provenance echo
+          and the readback assertion.
+        pattern: "parameters.json"
+  - - expected_params:
+        type: map
+        description: |
+          Groovy Map of the parameter values the pipeline intended, rendered to JSON and
+          compared against `parameters.json`. Recognised keys: `threads`, `autoclean`,
+          `threshold_multiplicity`, `cycle_min_length`, `cycle_max_length`,
+          `low_abundance`, `spacer_min_length`, `spacer_max_length`, `repeat_min_length`,
+          `repeat_max_length`. A mismatch FAILS THE TASK: MCAAT's argument parse loop has
+          no unknown-argument branch, so this is the only way to detect a flag that was
+          accepted and silently dropped. Pass `[:]` to disable.
+
+output:
+  tsv:
+    - - meta:
+          type: map
+          description: Groovy Map containing sample information.
+      - "*.arrays.tsv":
+          type: file
+          description: |
+            One row per spacer. Columns: `sample`, `array_id`, `source_file`,
+            `consensus_repeat`, `consensus_repeat_len`, `n_spacers`, `spacer_index`,
+            `repeat_variant`, `repeat_variant_is_consensus`, `spacer`, `spacer_len`.
+            `repeat_variant` always holds a real sequence -- dash runs have been expanded
+            to the consensus and `repeat_variant_is_consensus` records that they were.
+          pattern: "*.arrays.tsv"
+  fasta:
+    - - meta:
+          type: map
+          description: Groovy Map containing sample information.
+      - "*.spacers.fasta":
+          type: file
+          description: |
+            All spacers, unwrapped, with stable identifiers of the form
+            `><sample>|array<array_id>|sp<spacer_index>`. Empty when the sample yielded no
+            arrays.
+          pattern: "*.spacers.fasta"
+  provenance:
+    - - meta:
+          type: map
+          description: Groovy Map containing sample information.
+      - "*.provenance.tsv":
+          type: file
+          description: |
+            Single-row echo of the MCAAT settings recorded in `parameters.json`, consumed
+            by `COHORT_SUMMARISE` for the cohort provenance columns. This file exists
+            precisely because a bare `parameters.json` carries no sample identity and
+            because a cohort's worth of them all share one filename and therefore collide
+            when staged into a single Nextflow task.
+          pattern: "*.provenance.tsv"
+  mqc:
+    - "*_mcaat_genstats_mqc.tsv":
+        type: file
+        description: |
+          MultiQC general-statistics custom content (`id: mcaat_genstats`), discovered by
+          MultiQC's magic-filename mechanism. Always written, with zeroes when nothing was
+          found, so a legitimate zero-array sample appears in the report rather than
+          vanishing from it.
+        pattern: "*_mcaat_genstats_mqc.tsv"
+  versions:
+    - versions:
+        type: file
+        description: Emitted on the `versions` topic channel, not as a `versions.yml` file.
+
+authors:
+  - "@feeka94"
+maintainers:
+  - "@feeka94"

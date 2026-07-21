@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="mcaat-nf: CRISPR array and protospacer discovery in unassembled metagenomic reads" />
+    <title>mcaat-nf Pipeline Report</title>
+  </head>
+  <body style="font-family: Helvetica, Arial, sans-serif; padding: 30px; max-width: 800px; margin: 0 auto;">
+    <h1 style="margin-top: 0;">mcaat-nf ${version}</h1>
+    <h2 style="color: #666666; font-weight: normal; margin-top: 0;">Run Name: ${runName}</h2>
+
+    <% if (!success){ out << """
+    <div style="color: #a94442; background-color: #f2dede; border-color: #ebccd1; padding: 15px; margin-bottom: 20px; border: 1px solid transparent; border-radius: 4px;">
+      <h3 style="margin-top: 0; margin-bottom: 5px;">mcaat-nf execution completed unsuccessfully!</h3>
+      <p>The exit status of the task that caused the workflow execution to fail was: <code>${exitStatus}</code>.</p>
+      <p>The full error message was:</p>
+      <pre style="white-space: pre-wrap; overflow: visible; margin-bottom: 0;">${errorReport}</pre>
+    </div>
+    """ } else { out << """
+    <div style="color: #3c763d; background-color: #dff0d8; border-color: #d6e9c6; padding: 15px; margin-bottom: 20px; border: 1px solid transparent; border-radius: 4px;">
+      mcaat-nf execution completed successfully!
+    </div>
+    """ } %>
+
+    <p>The workflow was completed at <strong>${dateComplete}</strong> (duration: <strong>${duration}</strong>)</p>
+
+    <p>The command used to launch the workflow was as follows:</p>
+    <pre style="white-space: pre-wrap; overflow: visible; background-color: #ededed; padding: 15px; border-radius: 4px;">${commandLine}</pre>
+
+    <h3>Pipeline Configuration:</h3>
+    <table style="width: 100%; max-width: 100%; border-spacing: 0; border-collapse: collapse; border: 1px solid #e4e4e4;">
+      <tbody style="border-bottom: 1px solid #e4e4e4;">
+        <% out << summary.collect{ k, v -> "<tr><th style='text-align:left; padding: 3px 5px; border: 1px solid #e4e4e4;'>$k</th><td style='text-align:left; padding: 3px 5px; border: 1px solid #e4e4e4;'><samp>${v ?: 'N/A'}</samp></td></tr>" }.join("\n") %>
+      </tbody>
+    </table>
+
+    <p>mcaat-nf</p>
+    <p><a href="https://github.com/RNABioInfo/mcaat-nf">https://github.com/RNABioInfo/mcaat-nf</a></p>
+  </body>
+</html>

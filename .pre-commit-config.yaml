@@ -1,0 +1,45 @@
+# Pre-commit hooks for RNABioInfo/mcaat-nf.
+#
+# Run them with `prek` (the Rust pre-commit runner used by nf-core/tools 4.0.2 --
+# same config format, an order of magnitude faster to bootstrap) or with the
+# original `pre-commit`; both read this file:
+#
+#     pip install prek
+#     prek install          # install the git hook
+#     prek run --all-files  # what .github/workflows/linting.yml runs
+#
+# This file must exist: `prek run --all-files` exits non-zero with
+# "No .pre-commit-config.yaml file was found" when it does not, which makes the
+# linting workflow fail on 100 % of pushes for a reason unrelated to the change.
+#
+# NOTE: `nextflow lint` is deliberately NOT a hook here. It needs a JVM plus a
+# pinned Nextflow on PATH, which is a heavy and fragile dependency for a local
+# commit hook; the strict-syntax check runs instead as its own `nextflow-lint`
+# job in .github/workflows/linting.yml, against the same pinned Nextflow version
+# the test matrix uses.
+
+repos:
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: "v3.1.0"
+    hooks:
+      - id: prettier
+        additional_dependencies:
+          - prettier@3.6.2
+
+  - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
+    rev: "3.2.1"
+    hooks:
+      - id: editorconfig-checker
+        alias: ec
+
+  # The three parsers under bin/ are the only place in the pipeline that knows
+  # the MCAAT output grammar, so they are real, load-bearing Python and are
+  # linted as such. Lint only -- `ruff-format` is intentionally omitted so that
+  # a formatting opinion can never produce an unreviewable diff across files
+  # whose exact byte layout documents MCAAT's output format.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.2
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        files: ^bin/.*\.py$

@@ -1,0 +1,439 @@
+name: nf-test
+
+# Runs the nf-test suite for RNABioInfo/mcaat-nf.
+#
+# The file MUST be called `.github/workflows/nf-test.yml`: the nf-core/tools
+# 4.0.2 `files_exist` lint rule requires that exact path, and `.nf-core.yml`
+# waives it under `lint.files_unchanged` because the matrix below deliberately
+# diverges from the stock template in two ways:
+#
+#   1. `conda` is NOT in the profile matrix. MCAAT has no Bioconda recipe,
+#      so a conda job could never resolve the MCAAT processes. Re-enable the
+#      moment a recipe exists.
+#
+#   2. `docker` AND `singularity` both run on every PR, not just on PRs to
+#      main. This is not belt-and-braces: the upstream MCAAT image sets
+#      ENTRYPOINT ["mcaat"], which is FATAL under the Docker executor
+#      (Nextflow's `/bin/bash -ue .command.sh` becomes arguments to mcaat,
+#      is silently discarded, and the process aborts with 134) and completely
+#      INVISIBLE under Singularity, because `singularity exec` ignores the
+#      entrypoint. Testing only one engine would ship that class of bug.
+#
+# TEST DATA: every test profile resolves `params.pipelines_testdata_base_path`
+# against https://github.com/RNABioInfo/mcaat-nf-testdata (branch `main`).
+# THAT REPOSITORY DOES NOT EXIST YET. Until it is created and populated, every
+# job below that actually launches the pipeline will fail while staging the
+# samplesheet. See CHANGELOG.md and docs/usage.md.
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      run_optional_stages:
+        description: "Also run the opt-in phage / graph-reentry test profiles"
+        type: boolean
+        default: false
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  cancel-in-progress: true
+
+env:
+  NXF_ANSI_LOG: false
+  NXF_SINGULARITY_CACHEDIR: ${{ github.workspace }}/.singularity
+  NXF_SINGULARITY_LIBRARYDIR: ${{ github.workspace }}/.singularity
+  NFT_VER: "0.9.5"
+  # Keep the nf-test work root INSIDE the workspace. nf-test.config honours
+  # NFT_WORKDIR (`workDir = System.getenv("NFT_WORKDIR") ?: ".nf-test"`), and the
+  # failure-triage step below greps that tree for `.command.out` / `mcaat.log`.
+  # With the template's `~` value those files land under $HOME, every `find .`
+  # in the workspace matches nothing, and a red shard produces zero diagnostics
+  # -- which is fatal here, because MCAAT dup2's megahit's stderr to /dev/null
+  # and .command.err is EXPECTED to be empty on a graph-build failure.
+  NFT_WORKDIR: ${{ github.workspace }}/.nf-test
+  NFT_DIFF: "pdiff"
+  NFT_DIFF_ARGS: "--line-numbers --expand-tabs=2"
+  # MCAAT writes UTF-8: a literal em-dash in the CRISPR_Arrays_*.txt preamble
+  # (`# MCAAT — CRISPR Array Output`) and box-drawing characters in its progress
+  # banner. A C-locale runner mangles them and the parsers then fail on content
+  # that is actually fine.
+  LC_ALL: C.UTF-8
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Cheap gate: is there anything worth spending 16 runner-jobs on?
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect relevant changes
+    runs-on: ubuntu-latest
+    if: github.repository == 'RNABioInfo/mcaat-nf' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    outputs:
+      run_tests: ${{ steps.filter.outputs.any }}
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+        with:
+          # Full history. A shallow checkout on BOTH sides makes `git diff A...B`
+          # abort with "no merge base" as soon as the base branch has advanced
+          # past the commit the PR merge-ref was cut from -- a routine event on
+          # an active repo. Under `bash -e` that failure kills this job, skips
+          # nf-test, and turns `confirm-pass` red for a reason unrelated to the
+          # change under review.
+          fetch-depth: 0
+
+      - name: Decide whether to run the suite
+        id: filter
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+
+          # Always run on dispatch, release and pushes to a protected branch.
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Never let the fetch itself fail the job: fetch-depth 0 above means
+          # the base branch is almost certainly already present.
+          git fetch --no-tags origin "${BASE_REF}" || \
+            echo "::warning::git fetch of ${BASE_REF} failed; falling back to the local clone."
+
+          # Prefer the merge-base diff; fall back to a two-dot diff against the
+          # fetched tip if (for any reason) no merge base can be computed. Never
+          # let the filter itself fail the job -- when in doubt, run the suite.
+          if MERGE_BASE=$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null) \
+             || MERGE_BASE=$(git merge-base FETCH_HEAD HEAD 2>/dev/null); then
+            CHANGED=$(git diff --name-only "${MERGE_BASE}" HEAD)
+          elif CHANGED=$(git diff --name-only FETCH_HEAD HEAD 2>/dev/null); then
+            echo "::warning::No merge base with ${BASE_REF}; used a two-dot diff."
+          else
+            echo "::warning::Could not compute a diff; running the full suite."
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "${CHANGED}"
+
+          # Skip only if EVERY changed path is documentation.
+          if printf '%s\n' "${CHANGED}" \
+              | grep -qvE '^(docs/|README\.md|CHANGELOG\.md|CITATIONS\.md|\.github/ISSUE_TEMPLATE/|$)'; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # The suite: default pipeline test + every local module test.
+  # ---------------------------------------------------------------------------
+  nf-test:
+    name: ${{ matrix.profile }} | NF ${{ matrix.NXF_VER }} | shard ${{ matrix.shard }}/4
+    needs: changes
+    if: needs.changes.outputs.run_tests == 'true'
+    runs-on: ubuntu-latest
+    # `latest-everything` is a canary, not a gate: it tracks the Nextflow edge
+    # release and must never be able to block a merge.
+    continue-on-error: ${{ matrix.NXF_VER == 'latest-everything' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        NXF_VER:
+          - "25.10.4"
+          - "latest-everything"
+        profile:
+          - docker
+          - singularity
+        shard: [1, 2, 3, 4]
+        exclude:
+          # Keep the canary cheap: one engine is enough to detect a Nextflow
+          # DSL/runtime regression.
+          - NXF_VER: "latest-everything"
+            profile: singularity
+
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Free disk space
+        # The MCAAT image plus a Singularity conversion plus the SDBG work
+        # directory will not fit alongside the runner's preinstalled toolchains.
+        #
+        # $AGENT_TOOLSDIRECTORY (/opt/hostedtoolcache) is where setup-java,
+        # setup-nextflow and setup-nf-test install. Removing it as root without
+        # recreating it leaves a root-owned /opt with no hostedtoolcache child,
+        # and the very next step dies with
+        #   EACCES: permission denied, mkdir '/opt/hostedtoolcache'
+        # So: remove, recreate, hand it back to the unprivileged runner user.
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          if [ -n "${AGENT_TOOLSDIRECTORY:-}" ]; then
+            sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
+            sudo mkdir -p "${AGENT_TOOLSDIRECTORY}"
+            sudo chown -R "$(id -u):$(id -g)" "${AGENT_TOOLSDIRECTORY}"
+          fi
+          df -h
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "${{ matrix.NXF_VER }}"
+
+      - name: Install nf-test
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: "${{ env.NFT_VER }}"
+          install-pdiff: true
+
+      - name: Set up Apptainer
+        if: matrix.profile == 'singularity'
+        uses: eWaterCycle/setup-apptainer@main
+
+      - name: Prepare the Singularity cache
+        if: matrix.profile == 'singularity'
+        run: |
+          mkdir -p "${NXF_SINGULARITY_CACHEDIR}"
+          # Converting the MCAAT OCI image is slow; give it somewhere with room.
+          mkdir -p "${{ github.workspace }}/.apptainer-tmp"
+          echo "APPTAINER_TMPDIR=${{ github.workspace }}/.apptainer-tmp" >> "$GITHUB_ENV"
+          echo "SINGULARITY_TMPDIR=${{ github.workspace }}/.apptainer-tmp" >> "$GITHUB_ENV"
+
+      - name: Run nf-test
+        run: |
+          set -euo pipefail
+          mkdir -p "${NFT_WORKDIR}"
+
+          # Only the default pipeline test and the local module/subworkflow
+          # tests. The phage / graph-reentry pipeline tests are opt-in and run
+          # in the `optional-stages` job.
+          #
+          # Paths are collected rather than hardcoded so that a directory which
+          # does not yet contain any *.nf.test cannot fail the whole shard.
+          TARGETS=("tests/pipeline/test_default.nf.test")
+          for d in modules/local subworkflows/local; do
+            if [ -d "$d" ] && [ -n "$(find "$d" -name '*.nf.test' -print -quit)" ]; then
+              TARGETS+=("$d")
+            fi
+          done
+          echo "Running: ${TARGETS[*]}"
+          nf-test test \
+            "${TARGETS[@]}" \
+            --ci \
+            --shard ${{ matrix.shard }}/4 \
+            --profile "+${{ matrix.profile }}" \
+            --junitxml=nf-test-${{ matrix.profile }}-${{ matrix.shard }}.xml \
+            --tap=nf-test-${{ matrix.profile }}-${{ matrix.shard }}.tap
+
+      - name: Show Nextflow logs on failure
+        if: failure()
+        run: |
+          # MCAAT redirects megahit's stderr to /dev/null for the whole graph
+          # build, so .command.err is EXPECTED to be empty on a build failure.
+          # The diagnostics live in .command.out / mcaat.log.
+          #
+          # Search the nf-test work root (NFT_WORKDIR), not just the workspace:
+          # every task directory lives under $NFT_WORKDIR/<hash>/work/.
+          NFT_ROOT="$(eval echo "${NFT_WORKDIR:-.nf-test}")"
+          echo "Searching for logs under: ${NFT_ROOT} and ${GITHUB_WORKSPACE}"
+
+          dump() {
+            # $1 = label, $2 = max files to print. Paths arrive on stdin.
+            n=0
+            while IFS= read -r f; do
+              if [ -z "$f" ] || [ ! -f "$f" ]; then
+                continue
+              fi
+              echo "::group::$1 ${f}"
+              tail -n 200 "${f}" || true
+              echo "::endgroup::"
+              n=$((n + 1))
+              if [ "$n" -ge "$2" ]; then
+                break
+              fi
+            done
+          }
+
+          find "${NFT_ROOT}" "${GITHUB_WORKSPACE}" -name ".nextflow.log*" 2>/dev/null \
+            | sort -u | dump "nextflow log" 5
+          find "${NFT_ROOT}" "${GITHUB_WORKSPACE}" -path "*/work/*" -name ".command.out" 2>/dev/null \
+            | sort -u | dump "command stdout" 20
+          find "${NFT_ROOT}" "${GITHUB_WORKSPACE}" -path "*/work/*" -name ".command.err" 2>/dev/null \
+            | sort -u | dump "command stderr" 20
+          find "${NFT_ROOT}" "${GITHUB_WORKSPACE}" -name "mcaat.log" 2>/dev/null \
+            | sort -u | dump "mcaat log" 10
+
+      - name: Publish test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-report-${{ matrix.NXF_VER }}-${{ matrix.profile }}-${{ matrix.shard }}
+          path: |
+            nf-test-*.xml
+            nf-test-*.tap
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Opt-in: the experimental phage/protospacer stage plus graph re-entry.
+  # Not on the PR critical path -- phage curation is off by default
+  # (params.run_phage_curation = false) and its runtime is unbounded, and graph
+  # re-entry needs a previously published SDBG in the samplesheet.
+  #
+  # Both matrix entries reference a test file AND a profile config that exist on
+  # disk; the run step below fails hard if either goes missing. Do not
+  # reintroduce a "skip when absent" branch: a job that reports green having
+  # executed nothing is worse than no job, because a maintainer reading the
+  # check concludes the stage is covered.
+  # ---------------------------------------------------------------------------
+  optional-stages:
+    name: optional stages | ${{ matrix.tprofile }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.run_optional_stages ||
+      github.event_name == 'release' ||
+      contains(github.event.pull_request.labels.*.name, 'test-optional-stages')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tprofile: test_phage
+            tconfig: conf/test_phage.config
+            tfile: tests/pipeline/test_phage.nf.test
+          - tprofile: test_graph
+            tconfig: conf/test_graph.config
+            tfile: tests/pipeline/test_graph_reentry.nf.test
+
+    steps:
+      - name: Check out pipeline code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          if [ -n "${AGENT_TOOLSDIRECTORY:-}" ]; then
+            sudo rm -rf "${AGENT_TOOLSDIRECTORY}"
+            sudo mkdir -p "${AGENT_TOOLSDIRECTORY}"
+            sudo chown -R "$(id -u):$(id -g)" "${AGENT_TOOLSDIRECTORY}"
+          fi
+          df -h
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Nextflow
+        uses: nf-core/setup-nextflow@v2
+        with:
+          version: "25.10.4"
+
+      - name: Install nf-test
+        uses: nf-core/setup-nf-test@v1
+        with:
+          version: "${{ env.NFT_VER }}"
+          install-pdiff: true
+
+      - name: Run nf-test
+        run: |
+          set -euo pipefail
+
+          # A missing test file is a HARD FAILURE, never a green ::notice.
+          # This job existed for a while with an `exit 0` here while neither
+          # test file was written, so it reported success having executed
+          # nothing at all -- and the phage stage, which is the one optional
+          # stage the pipeline deliberately keeps, had no coverage whatsoever
+          # behind a green check. If a test or its profile is deleted, delete
+          # the matrix entry with it.
+          for f in "${{ matrix.tfile }}" "${{ matrix.tconfig }}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error file=${f}::${f} is missing; the ${{ matrix.tprofile }} matrix entry cannot run."
+              exit 1
+            fi
+          done
+          mkdir -p "${NFT_WORKDIR}"
+
+          # `+` APPENDS to the profile configured in nf-test.config (`test`), so
+          # this resolves to `-profile test,<tprofile>,docker`. Without the
+          # tprofile the run would silently fall back to the plain arrays-only
+          # `test` profile -- `run_phage_curation` defaults to false in
+          # nextflow.config -- and the assertions on the phage outputs would
+          # fail against a pipeline that never ran that stage.
+          nf-test test "${{ matrix.tfile }}" \
+            --ci \
+            --profile "+${{ matrix.tprofile }},docker" \
+            --junitxml=nf-test-${{ matrix.tprofile }}.xml
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          NFT_ROOT="$(eval echo "${NFT_WORKDIR:-.nf-test}")"
+          for f in $(find "${NFT_ROOT}" "${GITHUB_WORKSPACE}" -name ".nextflow.log*" 2>/dev/null | head -n 3); do
+            echo "::group::${f}"; tail -n 200 "${f}" || true; echo "::endgroup::"
+          done
+          for f in $(find "${NFT_ROOT}" -path "*/work/*" -name ".command.out" 2>/dev/null | head -n 10); do
+            echo "::group::${f}"; tail -n 100 "${f}" || true; echo "::endgroup::"
+          done
+          for f in $(find "${NFT_ROOT}" -name "phage_curate.log.gz" 2>/dev/null | head -n 5); do
+            echo "::group::${f}"; zcat "${f}" | tail -n 100 || true; echo "::endgroup::"
+          done
+
+      - name: Publish test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nf-test-report-${{ matrix.tprofile }}
+          path: nf-test-*.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Single required status check for branch protection.
+  # ---------------------------------------------------------------------------
+  confirm-pass:
+    name: confirm-pass
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - nf-test
+    if: always()
+    steps:
+      - name: All tests ok
+        if: ${{ !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+        run: echo "All required jobs passed (or were legitimately skipped)."
+
+      - name: One or more tests failed
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: exit 1
+
+      - name: One or more tests cancelled
+        if: ${{ contains(needs.*.result, 'cancelled') }}
+        run: exit 1
+
+      - name: Debug job results
+        if: always()
+        run: echo '${{ toJSON(needs.*.result) }}'

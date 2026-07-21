@@ -1,0 +1,89 @@
+# Paths excluded from the CONTENT snapshot in tests/pipeline/test_default.nf.test.
+#
+# This file is live, not documentation: that test builds its `stable_content`
+# list with
+#     getAllFilesFromDir("$outputDir", relative: false, includeDir: false,
+#                        ignoreFile: 'tests/.nftignore')
+# (nft-utils@1.0.0, loaded in nf-test.config). Anything NOT listed here is
+# md5-compared on every run, so a new non-deterministic output must be added
+# here in the same commit that introduces it.
+#
+# The two optional-stage tests (test_phage.nf.test, test_graph_reentry.nf.test)
+# assert on parsed content only and take no content snapshot at all; the phage
+# entries below are here so that adding one to those tests stays correct.
+#
+# It is also in nf-test.config's `triggers` list, so editing this file re-runs
+# the whole suite.
+#
+# Everything below is non-deterministic, wall-clock stamped, environment
+# dependent or simply enormous. See the SNAPSHOT POLICY note at the top of
+# tests/pipeline/test_default.nf.test.
+
+# --- Nextflow's own run reports: every filename carries
+# --- params.trace_report_suffix, a wall-clock timestamp.
+pipeline_info/execution_*.{html,txt}
+pipeline_info/pipeline_dag_*.html
+pipeline_info/params_*.json
+pipeline_info/*_software_versions.yml
+
+# --- MCAAT outputs -----------------------------------------------------------
+# cycles.txt line order comes from iterating an unordered_map, so byte-identical
+# input can yield a byte-different file.
+arrays/*/cycles.txt
+# parameters.json is a hand-serialised provenance dump carrying the absolute
+# work-directory path (input_files, output_folder, graph_folder, cycles_folder)
+# and the runner-derived ram_gb / threads figures.
+arrays/*/parameters.json
+# CRISPR_Arrays_*.txt carries `# Generated : YYYY-MM-DD HH:MM:SS` on the second
+# line of every file (include/crispr_array/post_processing.h).
+arrays/*/CRISPR_Arrays_*.txt
+arrays/*/*.mcaat.log
+# The per-sample tables are parsed straight out of CRISPR_Arrays_*.txt in file
+# order, which is cycles.txt order, so their ROW order is non-deterministic even
+# though their row SET is not. Same argument as reports/cohort_arrays*.tsv
+# below; the counts and the header contract are asserted on parsed content in
+# tests/pipeline/test_default.nf.test instead.
+arrays/*/*.arrays.tsv
+arrays/*/*.spacers.fasta
+# The SDBG shard count equals --num_cpu_threads, so both the file set and the
+# contents move with task.cpus.
+arrays/*/graph/**
+
+# --- Optional stage: phage / protospacer curation ----------------------------
+phage/*/*.log.gz
+# Record order follows the SDBG walk, and the walk is seeded from the spacers in
+# cycles.txt order.
+phage/*/*.phage_contigs.fasta
+
+# --- Cohort products that inherit MCAAT's ordering or its provenance ---------
+# Row order follows the array-file order, which follows cycles.txt.
+reports/cohort_arrays*.tsv
+# cohort_summary.tsv echoes the per-sample provenance columns (mcaat_threads,
+# mcaat_ram_gb), which are resolved from task.cpus / task.memory and therefore
+# differ between a runner and a workstation. Its VALUES are asserted
+# individually in tests/pipeline/test_default.nf.test instead.
+reports/cohort_summary.tsv
+# seqkit rmdup preserves INPUT order and keeps the first occurrence of each
+# duplicate sequence. Its input is the collectFile'd pool of the per-sample
+# *.spacers.fasta, so both the record order and WHICH sample's header survives
+# a duplicate are inherited from cycles.txt order. The header contract and the
+# identity of the producing process are asserted on parsed content in
+# tests/pipeline/test_default.nf.test instead.
+reports/cohort_spacers.unique.fasta
+#
+# NOT excluded, deliberately: cohort_spacer_sharing.tsv,
+# cohort_spacer_redundancy.tsv and cohort_repeat_families.tsv.
+# bin/mcaat_aggregate.py writes all three from an explicitly sorted row list
+# (write_sharing, write_redundancy and write_families each sort before writing,
+# and every multi-valued cell is `";".join(sorted(...))`), so they are
+# byte-stable for a fixed cohort and are the main thing the content snapshot is
+# there to protect. Do not add them here without first making them unsorted.
+
+# --- MultiQC embeds the run date and its own version in the HTML -------------
+multiqc/**
+
+# --- QC tool reports embed timestamps and absolute paths ---------------------
+qc/**/*.html
+qc/**/*.zip
+qc/**/*.json
+qc/**/*.log

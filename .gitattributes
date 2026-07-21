@@ -1,0 +1,33 @@
+# Force LF everywhere, on every platform.
+#
+# This pipeline executes on Linux. A CRLF line ending on the shebang line of a
+# bin/ script makes the kernel look for an interpreter literally named
+# "python3\r" and fail with "bad interpreter: No such file or directory" -- a
+# confusing error that only appears when the repo has been cloned on Windows.
+# Nextflow script blocks are shell scripts and have the same problem.
+* text=auto eol=lf
+
+# Explicit, so a misconfigured client cannot get these wrong.
+*.nf        text eol=lf
+*.config    text eol=lf
+*.py        text eol=lf
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.csv       text eol=lf
+*.nf.test   text eol=lf
+
+# Never touch binaries.
+*.png       binary
+*.jpg       binary
+*.gz        binary
+*.bam       binary
+*.fasta.gz  binary
+
+# GitHub language stats and diff behaviour (nf-core convention).
+*.config            linguist-language=nextflow
+*.nf.test           linguist-language=nextflow
+modules/nf-core/**      linguist-generated
+subworkflows/nf-core/** linguist-generated

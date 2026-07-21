@@ -1,0 +1,193 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Pipeline-level test: SDBG graph re-entry.
+
+    This file is the contract for conf/test_graph.config, which it loads
+    directly via the `config` directive so that a bare
+        nf-test test tests/pipeline/test_graph_reentry.nf.test
+    exercises the profile rather than silently falling back to the arrays-only
+    `test` profile configured in nf-test.config. CI additionally launches it as
+    `--profile "+test_graph,docker"` (see .github/workflows/nf-test.yml).
+
+    WHY THIS EXISTS. Graph re-entry is the riskiest path in
+    subworkflows/local/utils_nfcore_mcaat_pipeline: a samplesheet row carrying
+    `sdbg` skips MCAAT_RUN entirely, so every guard around it is launch-time
+    Groovy that no other test executes. Four of those guards are asserted here,
+    two positively and two by their error message.
+
+    THE SAMPLESHEET. conf/test_graph.config points params.input at
+    `mcaat-nf/samplesheet/samplesheet_graph.csv` in the test-data repository.
+    The fixture it describes, and which the assertions below encode:
+
+        sample,run,fastq_1,fastq_2,sdbg
+        gut_A,,<reads R1>,<reads R2>,
+        gut_A_reentry,,,,<published arrays/gut_A/ tree containing graph/ and
+                          the sibling CRISPR_Arrays_*.txt>
+
+    i.e. ONE read row and ONE re-entry row, so both branches of the
+    initialisation split are covered by a single run. The `sdbg` column must
+    point at the `graph` directory of a previously PUBLISHED run: the sibling
+    CRISPR_Arrays_*.txt are located by convention from the graph's parent (and,
+    as a fallback, its grandparent), and a directory without them is refused.
+
+    The assertions deliberately derive the two sample sets from the OUTPUT TREE
+    rather than hard-coding both names, so that adding a second re-entry row to
+    the fixture strengthens the test instead of breaking it. Only `gut_A` is
+    named, because it is the row that must behave exactly as it does under
+    -profile test.
+
+    TEST DATA: https://github.com/RNABioInfo/mcaat-nf-testdata (branch `main`)
+    DOES NOT EXIST YET, so this test cannot pass until it is created and
+    populated -- with, for this profile, a committed SDBG fixture as well as the
+    read libraries.
+
+    SNAPSHOT POLICY: the same rules as tests/pipeline/test_default.nf.test.
+    Nothing here is content-snapshotted.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+nextflow_pipeline {
+
+    name "mcaat-nf -profile test,test_graph"
+    script "../../main.nf"
+    config "../../conf/test_graph.config"
+
+    tag "pipeline"
+    tag "pipeline_graph_reentry"
+    tag "optional_stage"
+
+    test("-profile test_graph -- a pre-built SDBG re-enters the optional stage") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+
+            def dirnames = { String sub ->
+                def d = new File("$outputDir/${sub}".toString())
+                (d.listFiles() ?: new File[0])
+                    .findAll { f -> f.isDirectory() }
+                    .collect { f -> f.name }
+                    .toSet()
+            }
+
+            // Samples that ran MCAAT_RUN, and samples that ran the phage stage.
+            def array_samples = dirnames('arrays')
+            def phage_samples = dirnames('phage')
+
+            // Cohort roster, read from the published summary.
+            def summary        = path("$outputDir/reports/cohort_summary.tsv").readLines()
+            def sample_col     = (summary[0].split('\t', -1) as List).indexOf('sample')
+            def cohort_samples = summary[1..-1].collect { line -> line.split('\t', -1)[sample_col] }.toSet()
+
+            // The re-entry rows are, by definition, the ones that reached the
+            // phage stage without ever reaching array detection.
+            def reentry_samples = phage_samples - array_samples
+
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 0 },
+
+                // ---- both branches of the initialisation split ran ---------
+                { assert array_samples.contains('gut_A') },
+                { assert reentry_samples.size() >= 1 },
+                {
+                    // Every read row must also have reached the phage stage --
+                    // conf/test_graph.config enables it for the whole run.
+                    assert array_samples.every { s -> phage_samples.contains(s) }
+                },
+
+                // ---- a re-entry row skips MCAAT_RUN entirely ---------------
+                // No reads are staged for it, so it produces no arrays/<id>/
+                // directory, no parameters.json and no *.arrays.tsv. If any of
+                // those appear, the row was routed down the read branch.
+                {
+                    assert reentry_samples.every { s ->
+                        !path("$outputDir/arrays/${s}").exists()
+                    }
+                },
+
+                // ---- and therefore cannot enter the cohort tables ----------
+                // A re-entry row carries no parameters.json, so it cannot take
+                // part in the readback assertion that is this pipeline's only
+                // detector for a silently-dropped MCAAT flag. It must be absent
+                // from cohort_summary.tsv rather than present with NA columns.
+                { assert cohort_samples == array_samples },
+                { assert reentry_samples.every { s -> !cohort_samples.contains(s) } },
+
+                // ---- the graph was consumed as a DIRECTORY -----------------
+                // The number of graph.sdbg.<N> shards equals --num_cpu_threads,
+                // so the only way to hand the graph over is whole. Reaching
+                // "[1/3] Loading graph" in the log proves the `test -s
+                // <graph>/graph.sdbg_info` guard passed and SDBG::LoadFromFile
+                // was given a real metadata file.
+                {
+                    assert reentry_samples.every { s ->
+                        path("$outputDir/phage/${s}/phage_curate.log.gz").exists()
+                    }
+                },
+                {
+                    assert reentry_samples.every { s ->
+                        path("$outputDir/phage/${s}/phage_curate.log.gz").linesGzip
+                            .any { line -> line.contains('[1/3] Loading graph') }
+                    }
+                },
+                {
+                    // The re-entry row brought its own CRISPR_Arrays_*.txt, so
+                    // the mapping phase must have had something to map. A run
+                    // that fell through to "nothing to do" means the sibling
+                    // resolution in PIPELINE_INITIALISATION picked up an empty
+                    // or wrong directory.
+                    assert reentry_samples.every { s ->
+                        path("$outputDir/phage/${s}/phage_curate.log.gz").linesGzip
+                            .any { line -> line.contains('[2/3] Mapping arrays to graph') }
+                    }
+                },
+
+                // ---- the read row is unchanged -----------------------------
+                { assert path("$outputDir/arrays/gut_A/gut_A.arrays.tsv").exists() },
+                { assert path("$outputDir/arrays/gut_A/parameters.json").exists() },
+                { assert path("$outputDir/phage/gut_A/phage_curate.log.gz").exists() },
+
+                // ---- retention is not publication --------------------------
+                // mcaat_keep_graph = true is required for the read row; it does
+                // NOT imply save_mcaat_graph, which stays false.
+                { assert !path("$outputDir/arrays/gut_A/graph").exists() },
+            )
+        }
+    }
+
+    test("-profile test_graph -- an sdbg row is refused when the optional stage is off") {
+
+        // Graph re-entry feeds the optional stage and nothing else. With that
+        // stage off the row has no consumer at all: the graph would be
+        // validated, the sibling arrays located, and the sample then dropped on
+        // the floor -- a silent per-sample loss under exit code 0, which is the
+        // worst failure shape available in a cohort study. The initialisation
+        // subworkflow refuses it instead, and this is the only test that runs
+        // that branch.
+        when {
+            params {
+                outdir             = "$outputDir"
+                run_phage_curation = false
+            }
+        }
+
+        then {
+            def report = ([workflow.errorReport ?: '', workflow.errorMessage ?: ''] + (workflow.stdout ?: []))
+                .join('\n')
+
+            assertAll(
+                { assert workflow.failed },
+                { assert report.contains("supplies an 'sdbg' graph re-entry path") },
+                { assert report.contains('--run_phage_curation is not enabled') },
+                // The refusal is launch-time: nothing may have been executed.
+                { assert workflow.trace.succeeded().size() == 0 },
+                { assert workflow.trace.failed().size() == 0 },
+            )
+        }
+    }
+}

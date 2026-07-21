@@ -1,0 +1,4 @@
+sample,run,fastq_1,fastq_2,sdbg
+gut_A,L001,/data/reads/gut_A_L001_R1.fastq.gz,/data/reads/gut_A_L001_R2.fastq.gz,
+gut_A,L002,/data/reads/gut_A_L002_R1.fastq.gz,/data/reads/gut_A_L002_R2.fastq.gz,
+soil_B,,/data/reads/soil_B.fastq.gz,,

@@ -1,0 +1,98 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: "mcaat_phagecurate"
+description: |
+  EXPERIMENTAL. Reconstruct the contiguous mobile-element (phage / plasmid)
+  context that CRISPR spacers were acquired from, by isolating protospacer
+  entry and exit nodes in the succinct de Bruijn graph and enumerating
+  depth-limited paths between them. Disabled by default; part of the
+  unreleased MCAAT v2.0.0 track.
+keywords:
+  - protospacer
+  - phage
+  - crispr
+  - metagenomics
+  - de bruijn graph
+tools:
+  - "mcaat":
+      description: "Metagenomic CRISPR Array Analysis Tool - `phage-curate` subcommand."
+      homepage: "https://github.com/RNABioInfo/mcaat"
+      documentation: "https://github.com/RNABioInfo/mcaat/blob/main/readme.md"
+      tool_dev_url: "https://github.com/RNABioInfo/mcaat"
+      doi: ""
+      licence: ["GPL-3.0"]
+      identifier: ""
+
+input:
+  - - meta:
+        type: map
+        description: |
+          Groovy Map containing sample information
+          e.g. `[ id:'gut_A', single_end:false ]`
+    - arrays:
+        type: file
+        description: |
+          This sample's CRISPR_Arrays_*.txt files from MCAAT_RUN. Staged
+          into `arrays_in/` and copied into a dedicated `arrays/` directory
+          inside the task, because MCAAT's array discovery globs any file whose
+          name merely CONTAINS 'CRISPR_Arrays_' and would otherwise merge two
+          samples into a single run.
+        pattern: "CRISPR_Arrays_*.txt"
+    - graph:
+        type: directory
+        description: |
+          The pruned MCAAT SDBG directory (graph.sdbg_info plus graph.sdbg.<N>
+          shards) from MCAAT_RUN. The subcommand does not validate this path
+          itself, so the module asserts graph.sdbg_info is non-empty first.
+          Note that PhageCurator mutates the loaded graph in memory
+          (RevalidateAllNodesButSingleton), so this stage must never share a
+          process with another consumer of the same graph object; the on-disk
+          files are untouched, so the directory is safe to fan out to
+          several tasks.
+
+output:
+  - fasta:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "*.phage_contigs.fasta":
+          type: file
+          description: |
+            Reconstructed contiguous protospacer-containing paths, 501-2500 bp
+            each by construction. MCAAT writes these as ContiguousPaths.fasta,
+            with each record identified as
+            `>phage_excerpt_<reconstructed spacer sequence>` -- a fixed
+            `phage_excerpt_` prefix followed by the spacer nucleotide sequence
+            itself (src/protospacer_detection/phage_curator.cpp:570), carrying
+            no array id, no coordinates and no uniqueness guarantee. The module
+            rewrites the headers to `>{sample}|phage{n} spacer={seq} len={bp}`
+            so records are addressable across a cohort, stripping the
+            `phage_excerpt_` prefix so that the `spacer=` value is the bare
+            nucleotide sequence and therefore joins against
+            `<sample>.spacers.fasta` and the `spacer` column of
+            `cohort_arrays.tsv`. Optional: a sample whose arrays map to no
+            graph nodes exits 0 and writes nothing.
+          pattern: "*.phage_contigs.fasta"
+  - log:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "phage_curate.log.gz":
+          type: file
+          description: |
+            Gzipped combined stdout/stderr of the phage-curate run.
+          pattern: "*.log.gz"
+  - versions:
+      - "versions.yml":
+          type: file
+          description: File containing software versions
+          pattern: "versions.yml"
+
+authors:
+  - "@feeka94"
+maintainers:
+  - "@feeka94"

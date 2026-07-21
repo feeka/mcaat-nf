@@ -1,0 +1,130 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: "mcaat_run"
+description: |
+  Detect CRISPR arrays directly in unassembled metagenomic reads. MCAAT builds
+  a succinct de Bruijn graph (vendored megahit SDBG, k fixed at 23) from one or
+  two FASTQ/FASTA files, enumerates multicycles in that graph, and reconstructs
+  consensus repeats and spacers from them.
+keywords:
+  - crispr
+  - metagenomics
+  - spacer
+  - de bruijn graph
+  - assembly-free
+tools:
+  - "mcaat":
+      description: "Metagenomic CRISPR Array Analysis Tool - finds CRISPR arrays in raw unassembled reads via succinct de Bruijn graph multicycle detection."
+      homepage: "https://github.com/RNABioInfo/mcaat"
+      documentation: "https://github.com/RNABioInfo/mcaat/blob/main/readme.md"
+      tool_dev_url: "https://github.com/RNABioInfo/mcaat"
+      doi: ""
+      licence: ["GPL-3.0"]
+      identifier: ""
+
+input:
+  - - meta:
+        type: map
+        description: |
+          Groovy Map containing sample information. Only `id` and `single_end`
+          are consumed; `id` is the sole key used in output filenames and
+          publishDir paths.
+          e.g. `[ id:'gut_A', single_end:false ]`
+    - reads:
+        type: file
+        description: |
+          One (single-end) or two (paired-end) FASTQ/FASTA files, optionally
+          gzipped. MCAAT accepts EXACTLY one or two files and unconditionally
+          treats two as a strictly synchronised paired-end library, so lanes
+          must be merged upstream (CAT_FASTQ) and R1/R2 record counts must
+          match. Files are staged under `reads/` with names that never begin
+          with a dash, because `--input-files` stops consuming tokens at the
+          first argument starting with '-'.
+        pattern: "*.{fa,fasta,fq,fastq,fa.gz,fasta.gz,fq.gz,fastq.gz}"
+
+output:
+  - arrays:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "mcaat/CRISPR_Arrays_*.txt":
+          type: file
+          description: |
+            Human-readable CRISPR array report, split across numbered files at
+            a line budget (CRISPR_Arrays_1.txt, CRISPR_Arrays_2.txt, ...).
+            Array numbering is global and continuous across the split, so the
+            files must be read in NUMERIC order, not lexicographic order.
+            This output is NOT optional: when MCAAT finds nothing the module
+            synthesises a header-only file so a legitimate zero result is an
+            explicit zero row downstream rather than a missing sample.
+          pattern: "CRISPR_Arrays_*.txt"
+  - params_json:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "mcaat/parameters.json":
+          type: file
+          description: |
+            Hand-serialised record of the resolved settings. Used for a
+            readback assertion downstream, because MCAAT's argument loop has
+            no unknown-argument branch and silently ignores typo'd flags.
+            The `output_file` and `cycles_folder` keys name paths that are
+            never created and must not be used for path resolution.
+          pattern: "parameters.json"
+  - log:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "mcaat.log":
+          type: file
+          description: |
+            Combined stdout/stderr of the MCAAT run. This is the ONLY useful
+            diagnostic: megahit's stderr is redirected to /dev/null for the
+            whole graph-build phase, so .command.err is expected to be empty
+            even on a fatal build error.
+          pattern: "mcaat.log"
+  - graph:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "mcaat/graph":
+          type: directory
+          description: |
+            The pruned succinct de Bruijn graph directory (graph.sdbg_info plus
+            graph.sdbg.<N> shards). Emitted only when `mcaat_keep_graph` is
+            true. Declared as a DIRECTORY because the shard count equals the
+            thread count, so any enumerated glob breaks when task.cpus changes.
+            Required as input by the optional phage-curation stage, which is
+            why `mcaat_keep_graph` must stay true whenever
+            `run_phage_curation` is set.
+  - cycles:
+      - meta:
+          type: map
+          description: |
+            Groovy Map containing sample information
+            e.g. `[ id:'gut_A', single_end:false ]`
+      - "mcaat/cycles.txt":
+          type: file
+          description: |
+            Raw multicycle dump. Can be enormous on a real metagenome and its
+            line order is derived from unordered_map iteration, so it is not
+            byte-reproducible across runs. Never assert on its checksum.
+          pattern: "cycles.txt"
+  - versions:
+      - "versions.yml":
+          type: file
+          description: File containing software versions
+          pattern: "versions.yml"
+
+authors:
+  - "@feeka94"
+maintainers:
+  - "@feeka94"

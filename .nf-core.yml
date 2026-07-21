@@ -1,0 +1,127 @@
+repository_type: pipeline
+nf_core_version: "4.0.2"
+lint:
+  # `files_exist` is a HARD failure in nf-core lint: one unwaived missing path
+  # turns the nf-core-lint job red on 100% of pushes and PRs, for reasons
+  # unrelated to the change under review, and a permanently red check trains
+  # reviewers to ignore linting output entirely. Every path below is therefore a
+  # file this pipeline deliberately does not ship, with the reason it does not.
+  # Adding one of these files back is fine -- delete its entry in the same commit.
+  files_exist:
+    # igenomes is skipped via template.skip_features, so this file is absent by design.
+    - conf/igenomes.config
+    # The AWS full-test workflows require Seqera Platform and S3 secrets that only
+    # exist inside the nf-core GitHub organisation. mcaat-nf is not an nf-core
+    # pipeline, so both workflows are deleted rather than left permanently red.
+    - .github/workflows/awstest.yml
+    - .github/workflows/awsfulltest.yml
+    # Community-governance boilerplate that belongs to the nf-core organisation
+    # (its code of conduct, its issue forms, its contributing guide, its PR
+    # checklist). mcaat-nf is built with the template but is NOT an nf-core
+    # pipeline -- `template.is_nfcore` is false -- so shipping documents that
+    # point contributors at nf-core Slack and nf-core review process would be
+    # actively misleading.
+    - CODE_OF_CONDUCT.md
+    - .github/CONTRIBUTING.md
+    - .github/PULL_REQUEST_TEMPLATE.md
+    - .github/ISSUE_TEMPLATE/bug_report.yml
+    - .github/ISSUE_TEMPLATE/config.yml
+    - .github/ISSUE_TEMPLATE/feature_request.yml
+    # Dockstore registration is an nf-core organisation service.
+    - .github/.dockstore.yml
+    # branch.yml enforces the nf-core rule that PRs to `master` may only come
+    # from `dev` or a fork's patch branch. This repository protects `main` with
+    # GitHub branch-protection rules instead, so the workflow would only restate
+    # them less reliably.
+    - .github/workflows/branch.yml
+    # linting_comment.yml downloads the linting-logs artifact from a privileged
+    # `workflow_run` context and posts the markdown onto the PR. It needs
+    # pull-requests: write and does not work from forks; the log is uploaded as
+    # an artifact by .github/workflows/linting.yml instead, which is why that
+    # workflow no longer writes a PR_number.txt.
+    - .github/workflows/linting_comment.yml
+    # `nf-core pipelines download` targets pipelines published through nf-core
+    # infrastructure. The offline stub path it exercises is covered directly
+    # instead, by the `-stub` tests in tests/pipeline/test_default.nf.test and
+    # tests/pipeline/test_phage.nf.test.
+    - .github/workflows/download_pipeline.yml
+    # The e-mail templates are only ever rendered by the template's
+    # `sendmail`/`--email` completion hook, which this pipeline does not use.
+    - assets/email_template.html
+    - assets/email_template.txt
+    - assets/sendmail_template.txt
+    # nf-core branding assets. A non-nf-core pipeline must not carry the nf-core
+    # logo, so neither the assets nor docs/images/ exist here.
+    - assets/nf-core-mcaat-nf_logo_light.png
+    - docs/images/nf-core-mcaat-nf_logo_light.png
+    - docs/images/nf-core-mcaat-nf_logo_dark.png
+    # `*.config linguist-language=nextflow` and the `*.nf.test linguist-language`
+    # hints are GitHub cosmetics only.
+    - .gitattributes
+  # `files_unchanged` diffs a shipped file against the template's copy. A file
+  # this repository does not ship at all is reported here as well, so every
+  # path waived above that the rule also covers has to be repeated below.
+  files_unchanged:
+    # mcaat-nf is licensed GNU GPL-3.0, because it distributes a wrapper around
+    # the GPL-3.0 MCAAT source. The nf-core template ships the MIT licence text,
+    # so LICENSE will never match the template copy and the `files_unchanged`
+    # rule must keep ignoring it. Do NOT remove this entry: without it
+    # `nf-core pipelines lint` diffs 674 lines of GPL-3 against the template's
+    # short MIT text and fails on every push, including `--release` on main.
+    - LICENSE
+    # Deliberately diverged from the template: the nf-test matrix drops the conda
+    # profile (MCAAT has no Bioconda recipe) and keeps
+    # BOTH docker and singularity on every branch, because the ENTRYPOINT class of
+    # container bug is fatal under docker and completely invisible under singularity.
+    # The path is exact: the workflow MUST be called nf-test.yml, because that is
+    # the name the template's `files_exist` rule requires.
+    - .github/workflows/nf-test.yml
+    # Diverged from the template: `prek` replaces `pre-commit` as the runner, and
+    # two extra jobs (nextflow-lint, schema-lint) are added.
+    - .github/workflows/linting.yml
+    # Diverged from the template: an extra `*.snap` override (parser: json,
+    # printWidth: 200) so snapshot refreshes stay reviewable, plus MCAAT-specific
+    # ignore entries for tests/fixtures/ (byte-exact MCAAT output) and bin/.
+    - .prettierrc.yml
+    - .prettierignore
+    # Diverged from the template: adds a ruff hook scoped to bin/, and omits the
+    # `nextflow lint` hook (it runs as its own CI job instead, so a local commit
+    # does not require a JVM).
+    - .pre-commit-config.yaml
+    # README carries the "built with the nf-core template but NOT an nf-core
+    # pipeline" governance notice instead of the nf-core badge block.
+    - README.md
+    # Not shipped at all -- see the reasons under `files_exist` above. Listed
+    # again because `files_unchanged` treats an absent file as a mismatch.
+    - CODE_OF_CONDUCT.md
+    - .github/CONTRIBUTING.md
+    - .github/PULL_REQUEST_TEMPLATE.md
+    - .github/ISSUE_TEMPLATE/bug_report.yml
+    - .github/ISSUE_TEMPLATE/config.yml
+    - .github/ISSUE_TEMPLATE/feature_request.yml
+    - .github/.dockstore.yml
+    - .github/workflows/branch.yml
+    - .github/workflows/linting_comment.yml
+    - assets/email_template.html
+    - assets/email_template.txt
+    - assets/sendmail_template.txt
+    - assets/nf-core-mcaat-nf_logo_light.png
+    - docs/images/nf-core-mcaat-nf_logo_light.png
+    - docs/images/nf-core-mcaat-nf_logo_dark.png
+    - .gitattributes
+template:
+  author: "Fikrat Talibli"
+  description: "CRISPR array and protospacer discovery in unassembled metagenomes, powered by MCAAT"
+  force: false
+  is_nfcore: false
+  name: mcaat-nf
+  org: RNABioInfo
+  outdir: .
+  version: 1.0.0dev
+  skip_features:
+    - igenomes
+    # NOTE: we install fastqc as a module ourselves; this only skips the
+    # template's built-in wiring, which assumes a different channel shape.
+    - fastqc
+    - rocrate
+update: null

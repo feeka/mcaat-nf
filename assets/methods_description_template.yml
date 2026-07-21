@@ -1,0 +1,72 @@
+id: "RNABioInfo-mcaat-nf-methods-description"
+description: "Suggested text and references to use when describing pipeline usage within the methods section of a publication."
+section_name: "RNABioInfo/mcaat-nf Methods Description"
+section_href: "https://github.com/RNABioInfo/mcaat-nf"
+plot_type: "html"
+## This whole file, comments included, is rendered by `methodsDescriptionText()`
+## in subworkflows/local/utils_nfcore_mcaat_pipeline/main.nf with a Groovy
+## GStringTemplateEngine before MultiQC ever sees it. A dollar-brace placeholder
+## anywhere in the file - including in a comment - is evaluated, so never write
+## one that is not a real binding, and never write a bare dollar sign.
+##
+## The bindings available are:
+##   workflow           - the Nextflow `workflow` object as a map, so
+##                        workflow.manifest.version, workflow.nextflow.version
+##                        and workflow.commandLine all resolve
+##   manifest_map       - `workflow.manifest` as a plain map
+##   doi_text           - rendered pipeline DOI, empty when manifest.doi is unset
+##   nodoi_text         - a reminder list item shown only when there is no DOI
+##   tool_citations     - inline citation sentence, built from the enabled stages
+##   tool_bibliography  - bibliography list items for the enabled stages
+data: |
+  <h4>Methods</h4>
+  <p>
+    CRISPR arrays were detected directly in un-assembled metagenomic reads with
+    <a href="https://github.com/RNABioInfo/mcaat-nf">RNABioInfo/mcaat-nf</a>
+    v${workflow.manifest.version} ${doi_text}, a Nextflow pipeline built with the
+    nf-core template and tooling
+    (<a href="https://doi.org/10.1038/s41587-020-0439-x">Ewels <em>et al.</em>, 2020</a>)
+    but developed and maintained outside the nf-core community. The pipeline
+    orchestrates MCAAT
+    (<a href="https://doi.org/10.1093/femsml/uqaf016">Talibli and Voss, 2025</a>),
+    which builds a succinct de Bruijn graph over the reads with the MEGAHIT graph
+    constructor (<a href="https://doi.org/10.1093/bioinformatics/btv033">Li <em>et al.</em>, 2015</a>)
+    and recovers CRISPR repeat-spacer arrays as multicycles in that graph, refining
+    repeat and spacer consensus sequences with SPOA
+    (<a href="https://doi.org/10.1101/gr.214270.116">Vaser <em>et al.</em>, 2017</a>).
+    All supporting tools were executed from pinned containers, most of them
+    reproducible software environments from the Bioconda
+    (<a href="https://doi.org/10.1038/s41592-018-0046-7">Gruening <em>et al.</em>, 2018</a>)
+    and BioContainers
+    (<a href="https://doi.org/10.1093/bioinformatics/btx192">da Veiga Leprevost <em>et al.</em>, 2017</a>)
+    projects; MCAAT itself has no Bioconda recipe and is distributed as a
+    pipeline-owned container image built from a pinned source revision.
+  </p>
+  <p>
+    The pipeline was executed with Nextflow v${workflow.nextflow.version}
+    (<a href="https://doi.org/10.1038/nbt.3820">Di Tommaso <em>et al.</em>, 2017</a>)
+    using the following command:
+  </p>
+  <pre><code>${workflow.commandLine}</code></pre>
+  <p>${tool_citations}</p>
+  <h4>References</h4>
+  <ul>
+    <li>Talibli F, Voss B. MCAAT: Metagenomic CRISPR Array Analysis Tool. microLife. 2025. doi: <a href="https://doi.org/10.1093/femsml/uqaf016">10.1093/femsml/uqaf016</a></li>
+    <li>Li D, Liu CM, Luo R, Sadakane K, Lam TW. MEGAHIT: an ultra-fast single-node solution for large and complex metagenomics assembly via succinct de Bruijn graph. Bioinformatics. 2015;31(10):1674-1676. doi: <a href="https://doi.org/10.1093/bioinformatics/btv033">10.1093/bioinformatics/btv033</a></li>
+    <li>Vaser R, Sovic I, Nagarajan N, Sikic M. Fast and accurate de novo genome assembly from long uncorrected reads. Genome Research. 2017;27(5):737-746. doi: <a href="https://doi.org/10.1101/gr.214270.116">10.1101/gr.214270.116</a></li>
+    <li>Di Tommaso P, Chatzou M, Floden EW, Barja PP, Palumbo E, Notredame C. Nextflow enables reproducible computational workflows. Nature Biotechnology. 2017;35(4):316-319. doi: <a href="https://doi.org/10.1038/nbt.3820">10.1038/nbt.3820</a></li>
+    <li>Ewels PA, Peltzer A, Fillinger S, Patel H, Alneberg J, Wilm A, Garcia MU, Di Tommaso P, Nahnsen S. The nf-core framework for community-curated bioinformatics pipelines. Nature Biotechnology. 2020;38(3):276-278. doi: <a href="https://doi.org/10.1038/s41587-020-0439-x">10.1038/s41587-020-0439-x</a></li>
+    <li>Gruening B, Dale R, Sjoedin A, Chapman BA, Rowe J, Tomkins-Tinch CH, Valieris R, Koester J. Bioconda: sustainable and comprehensive software distribution for the life sciences. Nature Methods. 2018;15(7):475-476. doi: <a href="https://doi.org/10.1038/s41592-018-0046-7">10.1038/s41592-018-0046-7</a></li>
+    <li>da Veiga Leprevost F, Gruening B, Alves Aflitos S, Roest HL, Uszkoreit J, Barsnes H, Vaudel M, Moreno P, Gatto L, Weber J, Bai M, Jimenez RC, Sachsenberg T, Pfeuffer J, Vera Alvarez R, Griss J, Nesvizhskii AI, Perez-Riverol Y. BioContainers: an open-source and community-driven framework for software standardization. Bioinformatics. 2017;33(16):2580-2582. doi: <a href="https://doi.org/10.1093/bioinformatics/btx192">10.1093/bioinformatics/btx192</a></li>
+    ${tool_bibliography}
+  </ul>
+  <div class="alert alert-info">
+    <h5>Notes:</h5>
+    <ul>
+      ${nodoi_text}
+      <li>RNABioInfo/mcaat-nf is built with the nf-core template but is <em>not</em> an nf-core pipeline. Please do not refer to it as <code>nf-core/mcaat-nf</code>, and cite MCAAT itself as the analysis method.</li>
+      <li>MCAAT's k-mer size (23) and minimum k-mer count (1) are fixed in the graph build and are not configurable from this pipeline, so they need not be reported as tunable parameters.</li>
+      <li>The command above does not include parameters contained in any configs or profiles that may have been used. Ensure the config file is also uploaded with your publication.</li>
+      <li>You should also cite all software used within this run. Check the "Software Versions" of this report to get version information.</li>
+    </ul>
+  </div>

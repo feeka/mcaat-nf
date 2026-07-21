@@ -1,0 +1,381 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Pipeline-level test: the default path.
+
+    QC -> MCAAT array detection -> parse -> cohort aggregation -> MultiQC,
+    with the optional phage/protospacer stage off, which is its default
+    (params.run_phage_curation = false).
+
+    TEST DATA: -profile test resolves params.pipelines_testdata_base_path
+    against https://github.com/RNABioInfo/mcaat-nf-testdata (branch `main`).
+    THAT REPOSITORY DOES NOT EXIST YET, so this test cannot pass until it is
+    created and populated. Everything below describes the contract the fixtures
+    must satisfy; nothing below is currently green in CI.
+
+    SNAPSHOT POLICY -- read this before adding an assertion.
+
+    Nothing produced by MCAAT may be content-snapshotted. Three independent
+    sources of run-to-run variation make md5 assertions guaranteed CI flake:
+
+      1. CRISPR_Arrays_*.txt carries a wall-clock header line
+         `# Generated : YYYY-MM-DD HH:MM:SS` (written by
+         include/crispr_array/post_processing.h on every file it opens).
+      2. parameters.json is a hand-serialised provenance dump containing the
+         absolute Nextflow work-directory paths (input_files, output_folder,
+         graph_folder, cycles_folder) and the derived thread/RAM figures, which
+         vary with the runner.
+      3. cycles.txt line order is produced by iterating an unordered_map, so
+         byte-identical input can yield byte-different output -- and the
+         downstream spacer clustering and the per-sample tables all inherit
+         that ordering.
+
+    Therefore two snapshots, with different jobs:
+
+      * `stable_names` -- relative FILE NAMES only, for the whole output tree.
+        It is what catches an output that stopped being published, or one that
+        appeared under a new name.
+      * `stable_content` -- md5 of the files that survive `tests/.nftignore`.
+        Every path listed there is excluded for one of the three reasons above,
+        so what remains is genuinely byte-stable: the cohort tables written in
+        sorted order by bin/mcaat_aggregate.py, and the seqkit stats tables.
+        ADD A PATH TO tests/.nftignore before adding any output that inherits
+        MCAAT's ordering, its timestamps or its absolute paths.
+
+    Everything else is asserted on PARSED CONTENT -- counts, sorted sets and
+    specific cell values -- never on a checksum.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+nextflow_pipeline {
+
+    name "mcaat-nf -profile test"
+    script "../../main.nf"
+
+    tag "pipeline"
+    tag "pipeline_default"
+
+    test("-profile test -- default arrays-only path") {
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+
+            // Relative, sorted list of every published path, with the
+            // timestamp-suffixed Nextflow reports removed. Names only -- no
+            // content hashing.
+            //
+            // The function is getAllFilesFromDir(). That is the only directory
+            // walker nft-utils exposes (see the `plugins` block in
+            // nf-test.config, which pins nft-utils@1.0.0); there is no
+            // getAllFilesFromPath(), and calling one would raise
+            // groovy.lang.MissingMethodException from inside this `then` block,
+            // i.e. BEFORE assertAll() ever runs, making every assertion below
+            // dead code.
+            //
+            // Options are passed as NAMED arguments (Groovy gathers them into a
+            // leading Map): `relative`, `includeDir`, `ignore`, `ignoreFile`.
+            // The globs are matched against paths RELATIVE to the given root, so
+            // they must NOT be prefixed with `**/` -- `**/` requires at least
+            // one intervening separator and would therefore never match
+            // `pipeline_info/execution_*.html`, letting
+            // `params.trace_report_suffix` (a wall-clock timestamp) into the
+            // snapshot and breaking it on the second run forever.
+            //
+            // What this snapshot does NOT catch: two processes publishing the
+            // SAME basename into the same directory. The name list is identical
+            // to the non-colliding case and only the winning CONTENT varies with
+            // task completion order. Same-basename collisions have to be
+            // prevented at the producer (conf/modules.config gives CSVTK_CONCAT
+            // ext.prefix 'cohort_arrays_concat' and COHORT_SUMMARISE
+            // `--no-unique-fasta` for exactly that reason) and are asserted
+            // explicitly further down by listing reports/ and comparing the
+            // full basename set.
+            def stable_names = getAllFilesFromDir(
+                "$outputDir",
+                relative: true,
+                includeDir: false,
+                ignore: [
+                    'pipeline_info/execution_*.{html,txt}',
+                    'pipeline_info/pipeline_dag_*.html',
+                    'pipeline_info/params_*.json',
+                    'pipeline_info/*_software_versions.yml',
+                ]
+            ).collect { f -> f.toString() }.sort()
+
+            // Content snapshot over the byte-stable remainder. `ignoreFile`
+            // reads tests/.nftignore, which is the single place the exclusions
+            // are maintained -- do not duplicate that list here.
+            // `collect` before `sort`: Groovy's List.sort(Closure) sorts IN
+            // PLACE, and the list nft-utils hands back must not be assumed
+            // mutable. The copy also fixes the order the snapshot is written in,
+            // which is what makes the md5 list diffable across runs.
+            def stable_content = getAllFilesFromDir(
+                "$outputDir",
+                relative: false,
+                includeDir: false,
+                ignoreFile: 'tests/.nftignore'
+            ).collect { f -> f }.sort { f -> f.toString() }
+
+            // Provenance file. The workflow emits exactly one
+            // `*_software_versions.yml` into pipeline_info/ (currently
+            // `mcaat_software_versions.yml`); resolve it by pattern rather than
+            // by a hard-coded basename so that a FileNotFoundException inside
+            // removeNextflowVersion() can never turn a green pipeline run into
+            // a red shard.
+            def versions_dir   = new File("$outputDir/pipeline_info".toString())
+            def versions_files = (versions_dir.listFiles() ?: new File[0])
+                .findAll { f -> f.name.endsWith('_software_versions.yml') }
+                .collect { f -> f.toString() }
+                .sort()
+
+            // `split('\t', -1)` keeps trailing empty cells: mcaat_* provenance
+            // columns are last in the summary header, and the zero-arg split
+            // would drop them and shift every subsequent assertion.
+            def summary  = path("$outputDir/reports/cohort_summary.tsv").readLines()
+            def head     = summary[0].split('\t', -1) as List
+            def rows     = summary[1..-1].collect { line ->
+                [head, line.split('\t', -1) as List].transpose().collectEntries()
+            }
+            def bySample = rows.collectEntries { r -> [(r.sample): r] }
+
+            // The full basename set of reports/. This is the collision guard the
+            // name snapshot cannot be: if a second process ever starts writing
+            // one of these names, the set is unchanged, so the shapes of the
+            // individual files are asserted below as well.
+            def reports_dir   = new File("$outputDir/reports".toString())
+            def reports_files = (reports_dir.listFiles() ?: new File[0])
+                .findAll { f -> f.isFile() }
+                .collect { f -> f.name }
+                .sort()
+
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 0 },
+
+                // ---- provenance -------------------------------------------
+                { assert versions_files.size() == 1 },
+                {
+                    assert snapshot(
+                        removeNextflowVersion(versions_files[0])
+                    ).match("versions")
+                },
+                { assert snapshot(stable_names).match("stable_names") },
+                { assert snapshot(stable_content).match("stable_content") },
+
+                // ---- per-sample array outputs exist for every sample -------
+                { assert path("$outputDir/arrays/gut_A/gut_A.arrays.tsv").exists() },
+                { assert path("$outputDir/arrays/gut_A/gut_A.spacers.fasta").exists() },
+                { assert path("$outputDir/arrays/gut_A/parameters.json").exists() },
+                { assert path("$outputDir/arrays/soil_B/soil_B.arrays.tsv").exists() },
+                { assert path("$outputDir/arrays/empty_C/empty_C.arrays.tsv").exists() },
+
+                // MCAAT has three distinct zero-result shapes, one of which
+                // writes NO file at all. MCAAT_RUN normalises them by
+                // synthesising a header-only CRISPR_Arrays_1.txt, so a
+                // legitimate negative result must still appear on disk.
+                { assert path("$outputDir/arrays/empty_C/CRISPR_Arrays_1.txt").exists() },
+
+                // *.provenance.tsv is a pure intermediate: it is consumed by
+                // COHORT_SUMMARISE and echoed into cohort_summary.tsv, and
+                // conf/modules.config deliberately does not publish it.
+                { assert !path("$outputDir/arrays/gut_A/gut_A.provenance.tsv").exists() },
+
+                // ---- cohort table: one row per sample, zeros included ------
+                { assert bySample.keySet().sort() == ['empty_C', 'gut_A', 'soil_B'] },
+                { assert (bySample.gut_A.n_arrays as int) == 1 },
+                { assert (bySample.gut_A.n_spacers as int) == 11 },
+                { assert (bySample.soil_B.n_arrays as int) == 1 },
+
+                // The whole point of the empty_C fixture: a sample that finds
+                // nothing must be an explicit zero row, never a missing row.
+                { assert (bySample.empty_C.n_arrays as int) == 0 },
+                { assert (bySample.empty_C.n_spacers as int) == 0 },
+
+                // The provenance columns are the ONLY evidence that
+                // MCAAT_PARSEARRAYS.out.provenance actually reached
+                // COHORT_SUMMARISE. mcaat_aggregate.py writes the literal
+                // string "NA" into all three whenever the provenance tables are
+                // missing or were staged under the wrong suffix, so a wiring
+                // regression is silent everywhere except here.
+                //
+                // The VALUES are runner-dependent (threads/RAM follow
+                // resourceLimits), so assert shape, not equality.
+                {
+                    assert rows.every { r -> r.mcaat_threads != 'NA' && (r.mcaat_threads as int) > 0 }
+                },
+                {
+                    assert rows.every { r -> r.mcaat_ram_gb != 'NA' && (r.mcaat_ram_gb as double) > 0 }
+                },
+                {
+                    // Echoed straight from parameters.json, so it must equal the
+                    // pipeline default that -profile test does not override.
+                    assert rows.every { r -> (r.mcaat_threshold_multiplicity as int) == 20 }
+                },
+
+                // ---- parsed array content, not checksums ------------------
+                // 11 planted spacers + 1 header line.
+                { assert path("$outputDir/arrays/gut_A/gut_A.arrays.tsv").readLines().size() == 12 },
+                {
+                    // One array, therefore exactly one distinct consensus repeat.
+                    def lines = path("$outputDir/arrays/gut_A/gut_A.arrays.tsv").readLines()
+                    def cols  = lines[0].split('\t') as List
+                    def ci    = cols.indexOf('consensus_repeat')
+                    assert ci >= 0
+                    assert lines[1..-1].collect { it.split('\t')[ci] }.toSet().size() == 1
+                },
+                {
+                    // Spacer FASTA header contract, verbatim from
+                    // bin/mcaat_parse_arrays.py::write_spacers_fasta:
+                    //   >{sample}|array{n}|sp{n} repeat_len={n} spacer_len={n}
+                    // The two trailing key=value attributes are part of the
+                    // record and must be matched; an `$` anchored straight
+                    // after `sp\d+` fails on every single record.
+                    def fa = path("$outputDir/arrays/gut_A/gut_A.spacers.fasta").readLines()
+                    assert fa.count { it.startsWith('>') } == 11
+                    assert fa.findAll { it.startsWith('>') }.every {
+                        it ==~ /^>gut_A\|array\d+\|sp\d+ repeat_len=\d+ spacer_len=\d+$/
+                    }
+                },
+
+                // ---- cross-sample science ---------------------------------
+                // soil_B shares 3 spacers with gut_A by construction, so the
+                // sharing matrix must be non-trivial.
+                { assert path("$outputDir/reports/cohort_repeat_families.tsv").exists() },
+                { assert path("$outputDir/reports/cohort_spacer_redundancy.tsv").exists() },
+                { assert path("$outputDir/reports/cohort_spacer_sharing.tsv").text.contains('gut_A\tsoil_B') },
+                {
+                    def sharing = path("$outputDir/reports/cohort_spacer_sharing.tsv").readLines()
+                    def sh      = sharing[0].split('\t') as List
+                    def ia      = sh.indexOf('sample_a')
+                    def ib      = sh.indexOf('sample_b')
+                    def ins     = sh.indexOf('n_shared_spacers')
+                    assert ia >= 0 && ib >= 0 && ins >= 0
+                    def pair = sharing[1..-1]
+                        .collect { line -> line.split('\t') as List }
+                        .find { cells -> cells[ia] == 'gut_A' && cells[ib] == 'soil_B' }
+                    assert pair != null
+                    assert (pair[ins] as int) == 3
+                },
+
+                // ---- publish-path collisions ------------------------------
+                //
+                // reports/ is enumerated in full and compared as a SET, because
+                // a same-basename collision is invisible to a name snapshot.
+                // Two pairs of producers write into this one directory:
+                //
+                //   CSVTK_CONCAT       -> cohort_arrays_concat.tsv
+                //   COHORT_SUMMARISE   -> cohort_arrays.tsv (+ the other tables)
+                //   SEQKIT_RMDUP       -> cohort_spacers.unique.fasta
+                //   COHORT_SUMMARISE   -> nothing, it is given --no-unique-fasta
+                //
+                // Both separations live in conf/modules.config. If either is
+                // reverted this assertion fails on the missing basename, and the
+                // two shape assertions after it fail on the wrong producer's
+                // content even if the name set were somehow preserved.
+                {
+                    assert reports_files == [
+                        'cohort_arrays.tsv',
+                        'cohort_arrays_concat.tsv',
+                        'cohort_repeat_families.tsv',
+                        'cohort_spacer_redundancy.tsv',
+                        'cohort_spacer_sharing.tsv',
+                        'cohort_spacers.unique.fasta',
+                        'cohort_summary.tsv',
+                    ]
+                },
+                {
+                    // Which process won cohort_spacers.unique.fasta is decided by
+                    // the HEADER FORMAT, not by the filename. SEQKIT_RMDUP keeps
+                    // the header of each record's first occurrence, i.e. the
+                    // per-sample identifier written by bin/mcaat_parse_arrays.py.
+                    // bin/mcaat_aggregate.py would instead have written
+                    // `>cohort_spacer_<i> len=... n_samples=...`, so that shape
+                    // appearing here means --no-unique-fasta was dropped and the
+                    // publish path is racing again.
+                    def uniq = path("$outputDir/reports/cohort_spacers.unique.fasta").readLines()
+                    def hdrs = uniq.findAll { it.startsWith('>') }
+                    assert hdrs.size() > 0
+                    assert hdrs.every { !it.startsWith('>cohort_spacer_') }
+                    assert hdrs.every {
+                        it ==~ /^>\S+\|array\d+\|sp\d+ repeat_len=\d+ spacer_len=\d+$/
+                    }
+                },
+                {
+                    // Both cohort-wide array tables are the row-wise
+                    // concatenation of the per-sample TSVs with a SINGLE header
+                    // row, and every data row must name a sample from the roster.
+                    // 11 gut_A spacers + soil_B's rows + one header.
+                    def tables = [
+                        path("$outputDir/reports/cohort_arrays.tsv"),
+                        path("$outputDir/reports/cohort_arrays_concat.tsv"),
+                    ]
+                    assert tables.every { f ->
+                        def lines = f.readLines()
+                        def ids   = lines[1..-1].collect { line -> line.split('\t', -1)[0] }.toSet()
+                        lines.count { line -> line.startsWith('sample\t') } == 1 &&
+                            lines.size() > 1 &&
+                            ids.every { s -> s in ['gut_A', 'soil_B', 'empty_C'] }
+                    }
+                },
+
+                // ---- QC ---------------------------------------------------
+                { assert path("$outputDir/qc/fastqc/raw/gut_A").exists() },
+                { assert path("$outputDir/qc/fastqc/trimmed/gut_A").exists() },
+                { assert path("$outputDir/multiqc/multiqc_report.html").exists() },
+
+                // ---- things that must NOT be published by default ---------
+                // save_mcaat_graph / save_mcaat_cycles default false, and the
+                // phage stage defaults off. If any of these appear, a
+                // publishDir `enabled:` guard or a stage toggle has regressed.
+                { assert !path("$outputDir/arrays/gut_A/graph").exists() },
+                { assert !path("$outputDir/arrays/gut_A/cycles.txt").exists() },
+                { assert !path("$outputDir/phage").exists() },
+            )
+        }
+    }
+
+    test("-profile test -- stub run") {
+
+        // `nf-core pipelines download` attempts a stub run and fails the
+        // release CI if any process lacks a stub: block, so the stub path is
+        // load-bearing and must be tested here rather than discovered at
+        // release time.
+        options "-stub"
+
+        when {
+            params {
+                outdir = "$outputDir"
+            }
+        }
+
+        then {
+
+            // Same pattern-resolution as the full run: never hard-code the
+            // versions-file basename in an assertion.
+            def versions_dir   = new File("$outputDir/pipeline_info".toString())
+            def versions_files = (versions_dir.listFiles() ?: new File[0])
+                .findAll { f -> f.name.endsWith('_software_versions.yml') }
+                .collect { f -> f.toString() }
+                .sort()
+
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.trace.failed().size() == 0 },
+                { assert versions_files.size() == 1 },
+                {
+                    assert snapshot(
+                        removeNextflowVersion(versions_files[0])
+                    ).match("versions_stub")
+                },
+                // Every process must have produced its declared outputs from
+                // the stub block alone -- no missing-output errors.
+                { assert path("$outputDir/arrays/gut_A/CRISPR_Arrays_1.txt").exists() },
+                { assert path("$outputDir/arrays/gut_A/parameters.json").exists() },
+            )
+        }
+    }
+}
